@@ -5,6 +5,7 @@ import time
 from flask import Flask, jsonify, request
 import socket
 from mcp_client.manager import MCPServerManager
+import copy
 
 # Create Flask app
 app = Flask(__name__)
@@ -18,6 +19,33 @@ session_params = {}
 
 # Global MCP server manager instance
 mcp_manager = MCPServerManager()
+
+# Configurable list of sensitive parameter names to filter out
+SENSITIVE_PARAMS = os.getenv("MCP_SENSITIVE_PARAMS", "apiUrl,jwtToken").split(",")
+
+def filter_tool_schema(tool_schema, sensitive_params=None):
+    """
+    Remove sensitive parameters from a tool schema dict (supports JSON Schema in 'inputSchema').
+    Args:
+        tool_schema (dict): The tool schema as returned by the MCP server.
+        sensitive_params (list): List of parameter names to remove.
+    Returns:
+        dict: Filtered tool schema.
+    """
+    if sensitive_params is None:
+        sensitive_params = SENSITIVE_PARAMS
+    schema = copy.deepcopy(tool_schema)
+    # Remove from 'inputSchema' if present
+    if "inputSchema" in schema and isinstance(schema["inputSchema"], dict):
+        props = schema["inputSchema"].get("properties", {})
+        for param in sensitive_params:
+            props.pop(param, None)
+        # Also remove from 'required' if present
+        if "required" in schema["inputSchema"]:
+            schema["inputSchema"]["required"] = [
+                r for r in schema["inputSchema"]["required"] if r not in sensitive_params
+            ]
+    return schema
 
 # Health check endpoint
 @app.route('/health', methods=['GET'])
@@ -59,13 +87,16 @@ def shutdown():
 @app.route('/tools', methods=['GET'])
 def list_tools():
     """
-    List available MCP tools.
+    List available MCP tools with full schema for LLM use,
+    filtering out sensitive parameters.
     """
     global last_activity
     last_activity = time.time()
     try:
-        tools = mcp_manager.list_tools()
-        return jsonify({"tools": tools})
+        tools = mcp_manager.get_tool_schemas()
+        # Filter each tool schema
+        filtered_tools = [filter_tool_schema(tool) for tool in tools]
+        return jsonify({"tools": filtered_tools})
     except Exception as e:
         import traceback
         print("[MCP CLIENT] /tools error:", e, traceback.format_exc(), flush=True)
@@ -75,18 +106,63 @@ def list_tools():
 def call_tool():
     """
     Call an MCP tool by name with parameters.
-    Inject JWT/apiUrl from session_params if required by the tool.
+    Injects JWT/apiUrl from session_params if required.
+    Injects other parameters from session cache if they are expected by the tool and not provided by the LLM.
+    Caches all outputs from successful tool calls into the session.
     """
     global last_activity
     last_activity = time.time()
     data = request.get_json(force=True)
-    tool = data.get('tool')
+    tool_name = data.get('tool')
     params = data.get('params', {})
+
+    # 1. Standard injection of sensitive/session-wide parameters (LLM params take precedence if provided)
     for key in ("jwtToken", "apiUrl"):
-        if key in session_params and key not in params:
+        if key not in params and key in session_params: # Only inject if not provided by LLM
             params[key] = session_params[key]
+
+    # 2. Generic injection of other parameters from cache if not provided by LLM
+    # This requires knowing the tool's schema to identify expected parameters.
+    all_tool_schemas = mcp_manager.get_tool_schemas() # Assumes this returns a list of full schemas
+    target_tool_schema = next((s for s in all_tool_schemas if s.get("name") == tool_name), None)
+
+    if target_tool_schema:
+        input_schema_props = target_tool_schema.get("inputSchema", {}).get("properties", {})
+        for param_name in input_schema_props.keys():
+            if param_name not in params and param_name in session_params:
+                # Don't re-inject sensitive params if they were handled above or if they are explicitly SENSITIVE_PARAMS (already filtered from LLM view)
+                # This also avoids injecting them if they were NOT in session_params during step 1 but are now in session_params from a previous tool's output.
+                if param_name not in ("jwtToken", "apiUrl"):
+                    print(f"[MCP CLIENT] Parameter '{param_name}' for tool '{tool_name}' not in LLM call, injecting from session cache.", flush=True)
+                    params[param_name] = session_params[param_name]
+            elif param_name in params:
+                print(f"[MCP CLIENT] Parameter '{param_name}' for tool '{tool_name}' provided in LLM call, using explicit value.", flush=True)
+    else:
+        print(f"[MCP CLIENT] Warning: Could not find schema for tool '{tool_name}'. Skipping generic parameter injection.", flush=True)
+
+    # 3. Cache all current parameters (LLM-provided or client-injected) before calling the tool.
+    # This makes LLM-provided inputs (and client-injected values) available for subsequent, different tool calls if not overridden.
+    print(f"[MCP CLIENT] Caching current input parameters for tool '{tool_name}' before execution.", flush=True)
+    for key, value in params.items():
+        # jwtToken and apiUrl are primarily managed via /init and Step 1 injection.
+        # We cache other LLM-provided or client-injected values here.
+        if key not in ("jwtToken", "apiUrl"):
+             session_params[key] = value
+             print(f"[MCP CLIENT] Cached input param '{key}' into session.", flush=True)
+        # else: jwtToken & apiUrl are already in session_params from /init or just injected by Step 1;
+        # no need to re-cache them here unless LLM explicitly provided them, which is against the desired flow.
+
     try:
-        result = mcp_manager.call_tool(tool, params)
+        result = mcp_manager.call_tool(tool_name, params)
+
+        # 4. Automatic caching of all outputs from successful tool calls (renumbered step)
+        if isinstance(result, dict) and result.get("status") == "success":
+            print(f"[MCP CLIENT] Caching outputs from successful call to tool '{tool_name}'.", flush=True)
+            for key, value in result.items():
+                if key != "status": # Don't cache the status field itself
+                    session_params[key] = value
+                    print(f"[MCP CLIENT] Cached '{key}' from '{tool_name}' output into session.", flush=True)
+        
         return jsonify(result)
     except Exception as e:
         import traceback

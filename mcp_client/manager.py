@@ -121,7 +121,7 @@ class MCPServerManager:
         if self.session is None:
             raise RuntimeError(f"MCP session is not ready: {self._session_error}")
         fut = asyncio.run_coroutine_threadsafe(self._call_tool_async(tool, params), self.loop)
-        return fut.result(timeout=60)
+        return fut.result(timeout=310)
 
     async def _call_tool_async(self, tool, params):
         result_obj = await self.session.call_tool(tool, params)
@@ -130,4 +130,16 @@ class MCPServerManager:
             content = result_obj.content[0].text
             return json.loads(content)
         except Exception:
-            return {"result": result_obj.content[0].text} 
+            return {"result": result_obj.content[0].text}
+
+    def get_tool_schemas(self):
+        self.start()
+        if self.session is None:
+            raise RuntimeError(f"MCP session is not ready: {self._session_error}")
+        fut = asyncio.run_coroutine_threadsafe(self._get_tool_schemas_async(), self.loop)
+        return fut.result(timeout=30)
+
+    async def _get_tool_schemas_async(self):
+        tools = await self.session.list_tools()
+        # Return full tool objects as dicts
+        return [tool.model_dump() if hasattr(tool, 'model_dump') else tool.__dict__ for tool in tools.tools] 

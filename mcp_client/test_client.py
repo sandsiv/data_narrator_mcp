@@ -61,29 +61,98 @@ try:
     print("\n[TEST] /init ...")
     resp = requests.post(f"{base_url}/init", json={
         "apiUrl": API_URL,
-        "jwtToken": JWT_TOKEN,
-        "sourceId": SOURCE_ID,
-        "question": QUESTION
+        "jwtToken": JWT_TOKEN
     })
-    print("Result:", resp.json())
+    init_response = resp.json()
+    print("Result:", init_response)
+    if init_response.get("status") != "ok":
+        print("Error during /init, aborting test.")
+        client_proc.terminate()
+        exit(1)
 
     # 2. GET /tools
     print("\n[TEST] /tools ...")
     resp = requests.get(f"{base_url}/tools")
-    print("Result:", resp.json())
+    tools_json = resp.json()
+    print("Result:", tools_json)
+
+    # Show what LLM would get for tool descriptions
+    print("\n[LLM TOOL DESCRIPTIONS JSON]\n" + json.dumps(tools_json, indent=2))
 
     # 3. POST /call-tool (list_sources)
-    print("\n[TEST] /call-tool (list_sources) ...")
-    resp = requests.post(f"{base_url}/call-tool", json={
+    print("\n[TEST] /call-tool (list_sources with search) ...")
+    list_sources_payload = {
         "tool": "list_sources",
-        "params": {}
-    })
+        "params": {"search": "[20230110] Detect Detractor Model", "limit": 1}
+    }
+    print("Sending payload:", json.dumps(list_sources_payload, indent=2))
+    resp = requests.post(f"{base_url}/call-tool", json=list_sources_payload)
+    
+    source_id_to_use = None
     try:
-        print("Result:", json.dumps(resp.json(), indent=2))
-    except Exception:
-        print("Raw result:", resp.text)
+        list_sources_result = resp.json()
+        print("Result:", json.dumps(list_sources_result, indent=2))
+        if resp.status_code == 200 and isinstance(list_sources_result.get("data"), list) and list_sources_result["data"]:
+            source_id_to_use = list_sources_result["data"][0].get("id")
+            print(f"Extracted sourceId: {source_id_to_use}")
+        elif isinstance(list_sources_result.get("data"), list) and not list_sources_result["data"]:
+             print("No sources found matching the search criteria (data array is empty).")
+        else:
+            print(f"list_sources call failed (status {resp.status_code}) or returned unexpected structure.")
+            print("Response content:", list_sources_result)
+    except Exception as e:
+        print("Raw result (list_sources):", resp.text)
+        print(f"Error processing list_sources response: {e}")
 
-    # 4. POST /shutdown
+    if not source_id_to_use:
+        print("Cannot proceed without a sourceId. Terminating test.")
+    else:
+        # 4. POST /call-tool (prepare_analysis_configuration)
+        print("\n[TEST] /call-tool (prepare_analysis_configuration) ...")
+        prepare_payload = {
+            "tool": "prepare_analysis_configuration",
+            "params": {
+                "sourceId": source_id_to_use,
+                "question": QUESTION
+            }
+        }
+        print("Sending payload:", json.dumps(prepare_payload, indent=2))
+        resp = requests.post(f"{base_url}/call-tool", json=prepare_payload)
+        
+        markdown_config_to_use = None
+        try:
+            prepare_result = resp.json()
+            print("Result:", json.dumps(prepare_result, indent=2))
+            if prepare_result.get("status") == "success":
+                markdown_config_to_use = prepare_result.get("markdownConfig")
+                print(f"Extracted markdownConfig (first 100 chars): {markdown_config_to_use[:100] if markdown_config_to_use else 'None'}...")
+            else:
+                print("prepare_analysis_configuration call was not successful.")
+        except Exception as e:
+            print("Raw result (prepare_analysis_configuration):", resp.text)
+            print(f"Error processing prepare_analysis_configuration response: {e}")
+
+        if not markdown_config_to_use:
+            print("Cannot proceed without markdownConfig. Terminating test.")
+        else:
+            # 5. POST /call-tool (execute_analysis_from_config)
+            print("\n[TEST] /call-tool (execute_analysis_from_config) ...")
+            execute_payload = {
+                "tool": "execute_analysis_from_config",
+                "params": {
+                    "markdownConfig": markdown_config_to_use
+                }
+            }
+            print("Sending payload:", json.dumps(execute_payload, indent=2))
+            resp = requests.post(f"{base_url}/call-tool", json=execute_payload)
+            try:
+                execute_result = resp.json()
+                print("Result:", json.dumps(execute_result, indent=2))
+            except Exception as e:
+                print("Raw result (execute_analysis_from_config):", resp.text)
+                print(f"Error processing execute_analysis_from_config response: {e}")
+
+    # 6. POST /shutdown
     print("\n[TEST] /shutdown ...")
     try:
         resp = requests.post(f"{base_url}/shutdown")

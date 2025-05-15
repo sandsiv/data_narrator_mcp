@@ -66,7 +66,7 @@ async def get(endpoint, headers=None, params=None, timeout=DEFAULT_TIMEOUT):
         return resp.json()
 
 # --- MCP Tools ---
-@mcp.tool(description="Validate API settings by testing the connection to the external data API.")
+# @mcp.tool(description="Validate API settings by testing the connection to the external data API.")
 async def validate_settings(apiUrl: str, jwtToken: str) -> dict:
     """
     Test the connection to the external data API using the provided URL and JWT token.
@@ -90,9 +90,9 @@ async def validate_settings(apiUrl: str, jwtToken: str) -> dict:
     except Exception as e:
         logging.error(f"validate_settings error: {repr(e)}")
         return {"status": "error", "error": str(e)}
-logging.info("Registered tool: validate_settings")
+# logging.info("Registered tool: validate_settings")
 
-@mcp.tool(description="List available data sources from the external API.")
+@mcp.tool(description="List available data sources. Use this as the first step to find the 'sourceId' for analysis based on user query about data they want to analyze.")
 async def list_sources(apiUrl: str, jwtToken: str, search: str = "", page: int = 1, limit: int = 10) -> dict:
     """
     List available data sources from the external API.
@@ -110,14 +110,35 @@ async def list_sources(apiUrl: str, jwtToken: str, search: str = "", page: int =
     headers = {"X-API-URL": apiUrl, "X-JWT-TOKEN": jwtToken}
     params = {"search": search, "page": page, "limit": limit}
     try:
-        result = await get("/sources", headers=headers, params=params)
-        return result
+        full_result = await get("/sources", headers=headers, params=params)
+        
+        # Transform the result to a simpler structure for the LLM
+        simplified_sources = []
+        if isinstance(full_result.get("data"), list):
+            for source_data in full_result["data"]:
+                num_columns = 0
+                if isinstance(source_data.get("attributes"), list):
+                    num_columns = len(source_data["attributes"])
+                
+                simplified_sources.append({
+                    "id": source_data.get("id"),
+                    "title": source_data.get("title"),
+                    "type": source_data.get("type"),
+                    "updated": source_data.get("updated"), # or maxUpdated, choose one
+                    "numberOfColumns": num_columns
+                })
+        
+        return {
+            "count": full_result.get("count", 0),
+            "data": simplified_sources # Return the list of simplified source objects
+            # Add other pagination fields if necessary, e.g., from full_result if they exist
+        }
     except Exception as e:
         logging.error(f"list_sources error: {repr(e)}")
         return {"status": "error", "error": str(e)}
 logging.info("Registered tool: list_sources")
 
-@mcp.tool(description="Get the structure/schema for a given data source.")
+@mcp.tool(description="Get detailed structure (columns, data types) for a source ID. Useful for understanding data attributes before formulating a complex question or providing column descriptions.")
 async def get_source_structure(apiUrl: str, jwtToken: str, sourceId: str) -> dict:
     """
     Retrieve the structure/schema for a specified data source.
@@ -139,7 +160,7 @@ async def get_source_structure(apiUrl: str, jwtToken: str, sourceId: str) -> dic
         return {"status": "error", "error": str(e)}
 logging.info("Registered tool: get_source_structure")
 
-@mcp.tool(description="Analyze columns for a given source structure and optional descriptions.")
+# @mcp.tool(description="Analyze columns for a given source structure and optional descriptions.")
 async def analyze_columns(sourceStructure: dict, columnDescriptions: dict = None) -> dict:
     """
     Analyze columns for a given source structure, optionally using provided column descriptions.
@@ -162,9 +183,9 @@ async def analyze_columns(sourceStructure: dict, columnDescriptions: dict = None
     except Exception as e:
         logging.error(f"analyze_columns error: {repr(e)}")
         return {"status": "error", "error": str(e)}
-logging.info("Registered tool: analyze_columns")
+# logging.info("Registered tool: analyze_columns")
 
-@mcp.tool(description="Generate analysis strategy for a question and column analysis.")
+# @mcp.tool(description="Generate analysis strategy for a question and column analysis.")
 async def generate_strategy(question: str, columnAnalysis: list) -> dict:
     """
     Generate an analysis strategy for a given question and column analysis.
@@ -183,9 +204,9 @@ async def generate_strategy(question: str, columnAnalysis: list) -> dict:
     except Exception as e:
         logging.error(f"generate_strategy error: {repr(e)}")
         return {"status": "error", "error": str(e)}
-logging.info("Registered tool: generate_strategy")
+# logging.info("Registered tool: generate_strategy")
 
-@mcp.tool(description="Create dashboard configuration from question, column analysis, and strategy.")
+# @mcp.tool(description="Create dashboard configuration from question, column analysis, and strategy.")
 async def create_configuration(question: str, columnAnalysis: list, strategy: dict) -> dict:
     """
     Create a dashboard configuration from the question, column analysis, and strategy.
@@ -205,9 +226,9 @@ async def create_configuration(question: str, columnAnalysis: list, strategy: di
     except Exception as e:
         logging.error(f"create_configuration error: {repr(e)}")
         return {"status": "error", "error": str(e)}
-logging.info("Registered tool: create_configuration")
+# logging.info("Registered tool: create_configuration")
 
-@mcp.tool(description="Generate dashboard config (markdown) from question and source structure.")
+#@mcp.tool(description="Generate dashboard config (markdown) from question and source structure.")
 async def generate_config(question: str, sourceStructure: dict, columnDescriptions: dict = None, apiSettings: dict = None) -> dict:
     """
     Generate a dashboard configuration (in markdown) from a question and source structure.
@@ -232,9 +253,9 @@ async def generate_config(question: str, sourceStructure: dict, columnDescriptio
     except Exception as e:
         logging.error(f"generate_config error: {repr(e)}")
         return {"status": "error", "error": str(e)}
-logging.info("Registered tool: generate_config")
+# logging.info("Registered tool: generate_config")
 
-@mcp.tool(description="Create a dashboard from config, source structure, and API settings.")
+# @mcp.tool(description="Create a dashboard from config, source structure, and API settings.")
 async def create_dashboard(markdownConfig: str, sourceStructure: dict, apiSettings: dict) -> dict:
     """
     Create a dashboard from the provided markdown config, source structure, and API settings.
@@ -254,9 +275,9 @@ async def create_dashboard(markdownConfig: str, sourceStructure: dict, apiSettin
     except Exception as e:
         logging.error(f"create_dashboard error: {repr(e)}")
         return {"status": "error", "error": str(e)}
-logging.info("Registered tool: create_dashboard")
+# logging.info("Registered tool: create_dashboard")
 
-@mcp.tool(description="Fetch data for multiple charts using chart configs and API settings.")
+# @mcp.tool(description="Fetch data for multiple charts using chart configs and API settings.")
 async def get_charts_data(chartConfigs: list, apiSettings: dict) -> dict:
     """
     Fetch data for multiple charts using the provided chart configurations and API settings.
@@ -275,9 +296,9 @@ async def get_charts_data(chartConfigs: list, apiSettings: dict) -> dict:
     except Exception as e:
         logging.error(f"get_charts_data error: {repr(e)}")
         return {"status": "error", "error": str(e)}
-logging.info("Registered tool: get_charts_data")
+# logging.info("Registered tool: get_charts_data")
 
-@mcp.tool(description="Analyze chart data for insights based on a question and API settings.")
+# @mcp.tool(description="Analyze chart data for insights based on a question and API settings.")
 async def analyze_charts(chartData: dict, question: str, apiSettings: dict) -> dict:
     """
     Analyze chart data for insights, given a question and API settings.
@@ -297,9 +318,9 @@ async def analyze_charts(chartData: dict, question: str, apiSettings: dict) -> d
     except Exception as e:
         logging.error(f"analyze_charts error: {repr(e)}")
         return {"status": "error", "error": str(e)}
-logging.info("Registered tool: analyze_charts")
+# logging.info("Registered tool: analyze_charts")
 
-@mcp.tool(description="Generate a summary from insights, question, strategy, and API settings.")
+# @mcp.tool(description="Generate a summary from insights, question, strategy, and API settings.")
 async def generate_summary(insights: list, question: str, strategy: dict, apiSettings: dict, errors: list = None) -> dict:
     """
     Generate a summary from insights, question, strategy, and API settings.
@@ -323,9 +344,9 @@ async def generate_summary(insights: list, question: str, strategy: dict, apiSet
     except Exception as e:
         logging.error(f"generate_summary error: {repr(e)}")
         return {"status": "error", "error": str(e)}
-logging.info("Registered tool: generate_summary")
+# logging.info("Registered tool: generate_summary")
 
-@mcp.tool(description="Run the full analysis workflow (one-shot): source + question → answer + dashboard.")
+@mcp.tool(description="FAST TRACK: Run the full analysis workflow in one shot (source + question generating dashboard and insights ). Use for straightforward analyses where intermediate review of process is not needed.")
 async def analyze_source_question(
     apiUrl: str,
     jwtToken: str,
@@ -439,6 +460,172 @@ async def analyze_source_question(
         logging.error(f"analyze_source_question error: {repr(e)}")
         return {"status": "error", "error": str(e)}
 logging.info("Registered tool: analyze_source_question")
+
+# --- New Step-by-Step Tools ---
+
+@mcp.tool(description="Step 1 (Step-by-Step): Analyzes source & question to generate a dashboard configuration for review. The MCP client will cache outputs (markdownConfig, sourceStructure, columnAnalysis, strategy) and the input 'question' for potential use in subsequent steps.")
+async def prepare_analysis_configuration(
+    apiUrl: str,
+    jwtToken: str,
+    sourceId: str,
+    question: str,
+    columnDescriptions: dict = None
+) -> dict:
+    """
+    Analyzes the source data structure and the user's question to generate a
+    proposed dashboard configuration (in markdown). This allows review and
+    modification before executing the full analysis.
+
+    Internally calls:
+        1. Get source structure
+        2. Analyze columns
+        3. Generate strategy
+        4. Create configuration (markdown)
+
+    Args:
+        apiUrl (str): The base URL of the external API.
+        jwtToken (str): JWT token for authentication.
+        sourceId (str): ID of the data source to analyze.
+        question (str): Analytical question to answer.
+        columnDescriptions (dict, optional): Optional column descriptions.
+
+    Returns:
+        dict: {
+            "status": "success" | "error",
+            "markdownConfig": str,       // Markdown dashboard configuration
+            "sourceStructure": dict,     // Source structure used
+            "columnAnalysis": list,      // Results from column analysis
+            "strategy": dict,            // Generated analysis strategy
+            "error": str (if status == "error")
+        }
+    """
+    headers = {"X-API-URL": apiUrl, "X-JWT-TOKEN": jwtToken}
+    intermediate_results = {}
+    try:
+        # Step 1: Get source structure
+        source_structure = await get(f"/source/{sourceId}/structure", headers=headers, timeout=LONG_TIMEOUT)
+        intermediate_results["sourceStructure"] = source_structure
+
+        # Step 2: Analyze columns
+        payload_analyze_cols = {"sourceStructure": source_structure}
+        if columnDescriptions:
+            payload_analyze_cols["columnDescriptions"] = columnDescriptions
+        column_analysis_resp = await post("/analyze-columns", json=payload_analyze_cols, timeout=LONG_TIMEOUT)
+        if column_analysis_resp.get("status") != "success":
+            return {"status": "error", "error": column_analysis_resp.get("error", "Column analysis failed during preparation"), "intermediate": intermediate_results}
+        column_analysis = column_analysis_resp["columnAnalysis"]
+        intermediate_results["columnAnalysis"] = column_analysis
+
+        # Step 3: Generate strategy
+        strategy_resp = await post("/generate-strategy", json={"question": question, "columnAnalysis": column_analysis}, timeout=LONG_TIMEOUT)
+        if strategy_resp.get("status") != "success":
+            return {"status": "error", "error": strategy_resp.get("error", "Strategy generation failed during preparation"), "intermediate": intermediate_results}
+        strategy = strategy_resp["strategy"]
+        intermediate_results["strategy"] = strategy
+
+        # Step 4: Create configuration (markdown)
+        # Assumes /create-configuration returns the markdown string in "configuration" field
+        config_resp = await post("/create-configuration", json={"question": question, "columnAnalysis": column_analysis, "strategy": strategy}, timeout=LONG_TIMEOUT)
+        if config_resp.get("status") != "success":
+            return {"status": "error", "error": config_resp.get("error", "Configuration creation failed during preparation"), "intermediate": intermediate_results}
+        markdown_config = config_resp["configuration"] # This should be the markdown string
+
+        return {
+            "status": "success",
+            "markdownConfig": markdown_config,
+            "sourceStructure": source_structure,
+            "columnAnalysis": column_analysis,
+            "strategy": strategy
+        }
+    except Exception as e:
+        logging.error(f"prepare_analysis_configuration error: {repr(e)}")
+        return {"status": "error", "error": str(e), "intermediate": intermediate_results}
+logging.info("Registered tool: prepare_analysis_configuration")
+
+@mcp.tool(description="Step 2 (Step-by-Step): Executes analysis. Provide 'markdownConfig' (potentially modified after Step 1). The client automatically tries to use cached 'sourceStructure', 'strategy', and original 'question' from Step 1 if not explicitly provided.")
+async def execute_analysis_from_config(
+    apiUrl: str,
+    jwtToken: str,
+    question: str,
+    markdownConfig: str,
+    sourceStructure: dict,
+    strategy: dict
+) -> dict:
+    """
+    Executes the data analysis using a provided dashboard configuration (markdown),
+    source structure, and strategy. Creates the dashboard, fetches chart data,
+    analyzes it, and generates a final summary.
+
+    Args:
+        apiUrl (str): The base URL of the external API.
+        jwtToken (str): JWT token for authentication.
+        question (str): The analytical question (used for context in later steps).
+        markdownConfig (str): Dashboard configuration in markdown format.
+        sourceStructure (dict): The source structure (as returned by prepare_analysis_configuration or get_source_structure).
+        strategy (dict): The analysis strategy (as returned by prepare_analysis_configuration).
+
+    Returns:
+        dict: {
+            "status": "success" | "error",
+            "summary": str,          // Final answer/insight
+            "dashboardUrl": str,     // Link to the created dashboard
+            "intermediate": dict,    // Intermediate results (charts, data, insights)
+            "error": str (if status == "error")
+        }
+    """
+    api_settings = {"apiUrl": apiUrl, "jwtToken": jwtToken}
+    intermediate_results = {}
+    try:
+        # Step 1: Create dashboard (corresponds to original step 5)
+        dashboard_resp = await post("/create-dashboard", json={"markdownConfig": markdownConfig, "sourceStructure": sourceStructure, "apiSettings": api_settings}, timeout=LONG_TIMEOUT)
+        if dashboard_resp.get("status") != "success":
+            return {"status": "error", "error": dashboard_resp.get("error", "Dashboard creation failed during execution"), "intermediate": intermediate_results}
+        dashboard_url = dashboard_resp["dashboardUrl"]
+        charts = dashboard_resp["charts"]
+        intermediate_results["dashboard"] = {"dashboardUrl": dashboard_url, "charts": charts}
+
+        # Step 2: Get chart data (corresponds to original step 6)
+        chart_data_resp = await post("/charts/data", json={"chartConfigs": charts, "apiSettings": api_settings}, timeout=LONG_TIMEOUT)
+        if chart_data_resp.get("status") != "success":
+            return {"status": "error", "error": chart_data_resp.get("error", "Chart data fetch failed during execution"), "intermediate": intermediate_results}
+        chart_data = chart_data_resp["chartData"]
+        chart_errors = chart_data_resp.get("errors", [])
+        intermediate_results["chartData"] = {"chartData": chart_data, "errors": chart_errors}
+
+        # Step 3: Analyze charts (corresponds to original step 7)
+        insights_resp = await post("/analyze-charts", json={"chartData": chart_data, "question": question, "apiSettings": api_settings}, timeout=LONG_TIMEOUT)
+        if insights_resp.get("status") != "success":
+            return {"status": "error", "error": insights_resp.get("error", "Chart analysis failed during execution"), "intermediate": intermediate_results}
+        insights = insights_resp["insights"]
+        insights_errors = insights_resp.get("errors", [])
+        intermediate_results["insights"] = {"insights": insights, "errors": insights_errors}
+
+        # Step 4: Generate summary (corresponds to original step 8)
+        all_errors = chart_errors + insights_errors
+        summary_payload = {
+            "insights": insights,
+            "question": question,
+            "strategy": strategy, # Use the strategy passed in
+            "apiSettings": api_settings
+        }
+        if all_errors:
+            summary_payload["errors"] = all_errors
+
+        summary_resp = await post("/generate-summary", json=summary_payload, timeout=LONG_TIMEOUT)
+        if summary_resp.get("status") != "success":
+            return {"status": "error", "error": summary_resp.get("error", "Summary generation failed during execution"), "intermediate": intermediate_results}
+        summary = summary_resp["summary"]
+
+        return {
+            "status": "success",
+            "summary": summary,
+            "dashboardUrl": dashboard_url,
+            "intermediate": intermediate_results
+        }
+    except Exception as e:
+        logging.error(f"execute_analysis_from_config error: {repr(e)}")
+        return {"status": "error", "error": str(e), "intermediate": intermediate_results}
+logging.info("Registered tool: execute_analysis_from_config")
 
 # Print all registered tools after all definitions
 print("[DEBUG] All tools registered:", list(getattr(mcp, "_tools", {}).keys()))
