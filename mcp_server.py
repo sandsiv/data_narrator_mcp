@@ -43,7 +43,7 @@ mcp = FastMCP("Insight Digger MCP")
 logging.info("[STARTUP] FastMCP instance created")
 
 # Helper: Get API base URL for the Flask server
-API_BASE_URL = os.getenv("MCP_FLASK_API_URL", "http://localhost:5000/api")
+API_BASE_URL = os.getenv("INSIGHT_DIGGER_API_URL", "https://internal.sandsiv.com/data-narrator/api")
 
 # Set default timeouts
 DEFAULT_TIMEOUT = httpx.Timeout(60.0)
@@ -66,7 +66,7 @@ async def get(endpoint, headers=None, params=None, timeout=DEFAULT_TIMEOUT):
         return resp.json()
 
 # --- MCP Tools ---
-# @mcp.tool(description="Validate API settings by testing the connection to the external data API.")
+@mcp.tool(description="Validate API settings by testing the connection to the external data API. Args: apiUrl (str), jwtToken (str). Returns: {{'status': 'success'|'error', 'error': str (if status == 'error')}}.")
 async def validate_settings(apiUrl: str, jwtToken: str) -> dict:
     """
     Test the connection to the external data API using the provided URL and JWT token.
@@ -92,20 +92,11 @@ async def validate_settings(apiUrl: str, jwtToken: str) -> dict:
         return {"status": "error", "error": str(e)}
 # logging.info("Registered tool: validate_settings")
 
-@mcp.tool(description="List available data sources. Use this as the first step to find the 'sourceId' for analysis based on user query about data they want to analyze.")
+@mcp.tool(description="List available data sources. This is typically the FIRST interactive step in data analysis. The user will select a source from this list, and its 'id' (returned in the 'data' array) will be used as 'sourceId' in other tools like 'prepare_analysis_configuration' or 'analyze_source_question'. Call this to allow the user to see and choose a data source. Use name provided by the user as 'search' parameter to filter the list. Consider limit and page parameters in case of many sources with names that fit the search. Returns: {{'count': int, 'data': [{'id': str, 'title': str, 'type': str, 'updated': str, 'numberOfColumns': int}]}}.")
 async def list_sources(apiUrl: str, jwtToken: str, search: str = "", page: int = 1, limit: int = 10) -> dict:
     """
-    List available data sources from the external API.
-
-    Args:
-        apiUrl (str): The base URL of the external API.
-        jwtToken (str): JWT token for authentication.
-        search (str, optional): Search term to filter sources. Defaults to "".
-        page (int, optional): Page number for pagination. Defaults to 1.
-        limit (int, optional): Number of sources per page. Defaults to 10.
-
-    Returns:
-        dict: List of sources and pagination info, or error status.
+    List available data sources from the external API, allowing the user to choose one for analysis.
+    (Detailed comments here are for human developers; LLM guidance is in the decorator description.)
     """
     headers = {"X-API-URL": apiUrl, "X-JWT-TOKEN": jwtToken}
     params = {"search": search, "page": page, "limit": limit}
@@ -138,18 +129,11 @@ async def list_sources(apiUrl: str, jwtToken: str, search: str = "", page: int =
         return {"status": "error", "error": str(e)}
 logging.info("Registered tool: list_sources")
 
-@mcp.tool(description="Get detailed structure (columns, data types) for a source ID. Useful for understanding data attributes before formulating a complex question or providing column descriptions.")
+@mcp.tool(description="Get detailed structure (columns, data types) for a specific 'sourceId'. Call this AFTER the user selects a 'sourceId' from 'list_sources', if they need more details about the data before formulating a question or if 'columnDescriptions' are planned for 'prepare_analysis_configuration'. The output (source schema) can be presented to the user in user friendly way (e.g. markdown table). Returns: dict (source structure schema).")
 async def get_source_structure(apiUrl: str, jwtToken: str, sourceId: str) -> dict:
     """
     Retrieve the structure/schema for a specified data source.
-
-    Args:
-        apiUrl (str): The base URL of the external API.
-        jwtToken (str): JWT token for authentication.
-        sourceId (str): ID of the data source.
-
-    Returns:
-        dict: Source structure or error status.
+    (Detailed comments here are for human developers; LLM guidance is in the decorator description.)
     """
     headers = {"X-API-URL": apiUrl, "X-JWT-TOKEN": jwtToken}
     try:
@@ -346,7 +330,7 @@ async def generate_summary(insights: list, question: str, strategy: dict, apiSet
         return {"status": "error", "error": str(e)}
 # logging.info("Registered tool: generate_summary")
 
-@mcp.tool(description="FAST TRACK: Run the full analysis workflow in one shot (source + question generating dashboard and insights ). Use for straightforward analyses where intermediate review of process is not needed.")
+@mcp.tool(description="ONE-SHOT ANALYSIS: Runs the full analysis workflow directly from a 'sourceId' and 'question' to generate insights, a summary, and a dashboard URL. Use this when the user prefers a direct answer WITHOUT an intermediate review step of the analysis configuration. Returns: {{'summary': str, 'dashboardUrl': str, 'intermediate': {{...}}}}. Present 'summary' and 'dashboardUrl' to the user.")
 async def analyze_source_question(
     apiUrl: str,
     jwtToken: str,
@@ -369,18 +353,27 @@ async def analyze_source_question(
         9. Return summary, dashboard URL, and all intermediate results
 
     Args:
-        apiUrl (str): The base URL of the external API.
-        jwtToken (str): JWT token for authentication.
-        sourceId (str): ID of the data source to analyze.
-        question (str): Analytical question to answer.
+        apiUrl (str): The base URL of the external API. (Handled by MCP Client)
+        jwtToken (str): JWT token for authentication. (Handled by MCP Client)
+        sourceId (str): ID of the data source to analyze (selected by user).
+        question (str): Analytical question to answer (formulated by user).
         columnDescriptions (dict, optional): Optional column descriptions.
 
     Returns:
         dict: {
-            "summary": str,  # Final answer/insight
-            "dashboardUrl": str,  # Link to the created dashboard
-            "intermediate": dict  # All intermediate results (column analysis, strategy, config, etc.)
+            "summary": str,               // Final textual answer/insight for the user.
+            "dashboardUrl": str,          // Link to the interactive dashboard supporting the summary.
+            "intermediate": {             // Detailed intermediate results for transparency/debugging.
+                "sourceStructure": dict,
+                "columnAnalysis": list,
+                "strategy": dict,
+                "configuration": str,     // The markdown configuration used
+                "dashboard": {"dashboardUrl": str, "charts": list},
+                "chartData": {"chartData": dict, "errors": list},
+                "insights": {"insights": list, "errors": list}
+            }
         } or error status.
+        The LLM should primarily present the 'summary' and 'dashboardUrl' to the user.
     """
     headers = {"X-API-URL": apiUrl, "X-JWT-TOKEN": jwtToken}
     try:
@@ -463,7 +456,7 @@ logging.info("Registered tool: analyze_source_question")
 
 # --- New Step-by-Step Tools ---
 
-@mcp.tool(description="Step 1 (Step-by-Step): Analyzes source & question to generate a dashboard configuration for review. The MCP client will cache outputs (markdownConfig, sourceStructure, columnAnalysis, strategy) and the input 'question' for potential use in subsequent steps.")
+@mcp.tool(description="STEP 1 of 2-STEP ANALYSIS: Analyzes 'sourceId' and 'question' to generate a 'markdownConfig' (dashboard configuration text) for user review. Also returns 'sourceStructure', 'columnAnalysis', and 'strategy' which are needed for STEP 2 ('execute_analysis_from_config'). Use this when the user wants to inspect or modify the analysis plan before execution. Returns: {{'status': 'success'|'error', 'markdownConfig': str, 'sourceStructure': dict, 'columnAnalysis': list, 'strategy': dict}}. Present 'markdownConfig' to the user for review/modification. The other returned fields are for context and can be used for explaining the proposed dashboard configuration logic to the user.")
 async def prepare_analysis_configuration(
     apiUrl: str,
     jwtToken: str,
@@ -476,28 +469,29 @@ async def prepare_analysis_configuration(
     proposed dashboard configuration (in markdown). This allows review and
     modification before executing the full analysis.
 
-    Internally calls:
-        1. Get source structure
-        2. Analyze columns
-        3. Generate strategy
-        4. Create configuration (markdown)
+    Internally, this tool:
+        1. Fetches source structure for the given 'sourceId'.
+        2. Analyzes columns (optionally using 'columnDescriptions').
+        3. Generates an analysis 'strategy' based on the 'question' and column analysis.
+        4. Creates the 'markdownConfig' based on the 'question', column analysis, and 'strategy'.
 
     Args:
-        apiUrl (str): The base URL of the external API.
-        jwtToken (str): JWT token for authentication.
-        sourceId (str): ID of the data source to analyze.
-        question (str): Analytical question to answer.
-        columnDescriptions (dict, optional): Optional column descriptions.
+        apiUrl (str): The base URL of the external API. (Handled by MCP Client)
+        jwtToken (str): JWT token for authentication. (Handled by MCP Client)
+        sourceId (str): ID of the data source to analyze (selected by user).
+        question (str): Analytical question to answer (formulated by user).
+        columnDescriptions (dict, optional): Optional user-provided descriptions for columns to refine analysis.
 
     Returns:
         dict: {
             "status": "success" | "error",
-            "markdownConfig": str,       // Markdown dashboard configuration
-            "sourceStructure": dict,     // Source structure used
-            "columnAnalysis": list,      // Results from column analysis
-            "strategy": dict,            // Generated analysis strategy
+            "markdownConfig": str,       // The generated dashboard configuration in markdown format. LLM should present this to the user for review and potential modification.
+            "sourceStructure": dict,     // The source structure used for this configuration. Needed if calling 'execute_analysis_from_config' next.
+            "columnAnalysis": list,      // Results from the internal column analysis.
+            "strategy": dict,            // The generated analysis strategy. Needed if calling 'execute_analysis_from_config' next.
             "error": str (if status == "error")
         }
+        The LLM should present 'markdownConfig' to the user. If the user approves or modifies it, then 'execute_analysis_from_config' should be called next, passing the (potentially modified) 'markdownConfig', along with the 'question', 'sourceStructure', and 'strategy' returned by this tool.
     """
     headers = {"X-API-URL": apiUrl, "X-JWT-TOKEN": jwtToken}
     intermediate_results = {}
@@ -542,7 +536,7 @@ async def prepare_analysis_configuration(
         return {"status": "error", "error": str(e), "intermediate": intermediate_results}
 logging.info("Registered tool: prepare_analysis_configuration")
 
-@mcp.tool(description="Step 2 (Step-by-Step): Executes analysis. Provide 'markdownConfig' (potentially modified after Step 1). The client automatically tries to use cached 'sourceStructure', 'strategy', and original 'question' from Step 1 if not explicitly provided.")
+@mcp.tool(description="STEP 2 of 2-STEP ANALYSIS: Executes analysis using a 'markdownConfig', 'question', 'sourceStructure', and 'strategy'. Call this AFTER 'prepare_analysis_configuration' AND after the user has reviewed (and potentially modified) the 'markdownConfig'. Generates the final summary and dashboard. Can be called without arguments, then MCP will use all cached intermediate results from 'prepare_analysis_configuration'. If user wants to modify the 'markdownConfig', then this tool should be called with the modified 'markdownConfig', the rest of the arguments would be taken from cached intermediate results. Returns: {{'status': 'success'|'error', 'summary': str, 'dashboardUrl': str, 'intermediate': {{...}}}}. Present 'summary' and 'dashboardUrl' to the user.")
 async def execute_analysis_from_config(
     apiUrl: str,
     jwtToken: str,
@@ -557,21 +551,22 @@ async def execute_analysis_from_config(
     analyzes it, and generates a final summary.
 
     Args:
-        apiUrl (str): The base URL of the external API.
-        jwtToken (str): JWT token for authentication.
-        question (str): The analytical question (used for context in later steps).
-        markdownConfig (str): Dashboard configuration in markdown format.
-        sourceStructure (dict): The source structure (as returned by prepare_analysis_configuration or get_source_structure).
-        strategy (dict): The analysis strategy (as returned by prepare_analysis_configuration).
+        apiUrl (str): The base URL of the external API. (Handled by MCP Client)
+        jwtToken (str): JWT token for authentication. (Handled by MCP Client)
+        question (str): The original analytical question. This MUST be provided by the LLM, matching the question used for 'prepare_analysis_configuration'.
+        markdownConfig (str): The dashboard configuration in markdown format. This MUST be provided by the LLM. It should be the output from 'prepare_analysis_configuration', potentially modified by the user.
+        sourceStructure (dict): The source structure corresponding to the 'markdownConfig'. This MUST be provided by the LLM, obtained from 'prepare_analysis_configuration' output.
+        strategy (dict): The analysis strategy corresponding to the 'markdownConfig'. This MUST be provided by the LLM, obtained from 'prepare_analysis_configuration' output.
 
     Returns:
         dict: {
             "status": "success" | "error",
-            "summary": str,          // Final answer/insight
-            "dashboardUrl": str,     // Link to the created dashboard
-            "intermediate": dict,    // Intermediate results (charts, data, insights)
+            "summary": str,          // Final textual answer/insight for the user.
+            "dashboardUrl": str,     // Link to the interactive dashboard supporting the summary.
+            "intermediate": dict,    // Detailed intermediate results (charts, data, insights).
             "error": str (if status == "error")
         }
+        The LLM should primarily present the 'summary' and 'dashboardUrl' to the user.
     """
     api_settings = {"apiUrl": apiUrl, "jwtToken": jwtToken}
     intermediate_results = {}

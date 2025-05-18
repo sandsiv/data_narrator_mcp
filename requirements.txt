@@ -3,6 +3,5 @@ Flask>=2.0
 httpx
 mcp
 python-dotenv
-starlette
 requests
 python-dotenv
