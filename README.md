@@ -17,4 +17,4 @@ The MCP client is a lightweight HTTP server that manages a single chat session f
 1. Start the MCP client process (no arguments needed).
 2. POST session parameters (JWT, etc.) to `/init`.
 3. Use `/tools` and `/call-tool` as needed.
-4. Call `/shutdown` or wait for idle timeout (1 hour) for auto-shutdown. 
+4. Call `/shutdown` when done with the session. 

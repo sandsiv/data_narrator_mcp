@@ -21,7 +21,7 @@ if missing:
     sys.exit(1)
 
 async def main():
-    print("\n--- MCP Tools Health Check (STDIO) ---\n")
+    print("\n--- MCP Tools Health Check ---\n")
     server_params = StdioServerParameters(
         command="mcp",
         args=["run", SERVER_SCRIPT],
@@ -46,19 +46,19 @@ async def main():
             insights = None
 
             # 1. validate_settings
-            print("\n[TEST] validate_settings ...")
+            print("\nTesting validate_settings...")
             result_obj = await session.call_tool("validate_settings", {"apiUrl": API_URL, "jwtToken": JWT_TOKEN})
             result = json.loads(result_obj.content[0].text)
             print("Result:", result)
 
             # 2. list_sources
-            print("\n[TEST] list_sources ...")
+            print("\nTesting list_sources...")
             result_obj = await session.call_tool("list_sources", {"apiUrl": API_URL, "jwtToken": JWT_TOKEN, "search": "", "page": 1, "limit": 5})
             result = json.loads(result_obj.content[0].text)
             print("Result:", result)
 
             # 3. get_source_structure
-            print("\n[TEST] get_source_structure ...")
+            print("\nTesting get_source_structure...")
             result_obj = await session.call_tool("get_source_structure", {"apiUrl": API_URL, "jwtToken": JWT_TOKEN, "sourceId": SOURCE_ID})
             source_structure = json.loads(result_obj.content[0].text)
             print("Result:", source_structure)
@@ -71,28 +71,28 @@ async def main():
             print("[DEBUG] source_structure size (chars):", len(json.dumps(source_structure)))
 
             # 4. analyze_columns
-            print("\n[TEST] analyze_columns ...")
+            print("\nTesting analyze_columns...")
             result_obj = await session.call_tool("analyze_columns", {"sourceStructure": source_structure})
             column_analysis_result = json.loads(result_obj.content[0].text)
             print("Result:", column_analysis_result)
             column_analysis = column_analysis_result.get("columnAnalysis")
 
             # 5. generate_strategy
-            print("\n[TEST] generate_strategy ...")
+            print("\nTesting generate_strategy...")
             result_obj = await session.call_tool("generate_strategy", {"question": QUESTION, "columnAnalysis": column_analysis})
             strategy_result = json.loads(result_obj.content[0].text)
             print("Result:", strategy_result)
             strategy = strategy_result.get("strategy")
 
             # 6. create_configuration
-            print("\n[TEST] create_configuration ...")
+            print("\nTesting create_configuration...")
             result_obj = await session.call_tool("create_configuration", {"question": QUESTION, "columnAnalysis": column_analysis, "strategy": strategy})
             config_result = json.loads(result_obj.content[0].text)
             print("Result:", config_result)
             config = config_result.get("configuration")
 
             # 7. generate_config
-            print("\n[TEST] generate_config ...")
+            print("\nTesting generate_config...")
             result_obj = await session.call_tool(
                 "generate_config",
                 {
@@ -105,28 +105,28 @@ async def main():
             print("Result:", gen_config_result)
 
             # 8. create_dashboard
-            print("\n[TEST] create_dashboard ...")
+            print("\nTesting create_dashboard...")
             result_obj = await session.call_tool("create_dashboard", {"markdownConfig": config, "sourceStructure": source_structure, "apiSettings": {"apiUrl": API_URL, "jwtToken": JWT_TOKEN}})
             dashboard_result = json.loads(result_obj.content[0].text)
             print("Result:", dashboard_result)
             dashboard = dashboard_result
 
             # 9. get_charts_data
-            print("\n[TEST] get_charts_data ...")
+            print("\nTesting get_charts_data...")
             result_obj = await session.call_tool("get_charts_data", {"chartConfigs": dashboard.get("charts", []), "apiSettings": {"apiUrl": API_URL, "jwtToken": JWT_TOKEN}})
             chart_data_result = json.loads(result_obj.content[0].text)
             print("Result:", chart_data_result)
             chart_data = chart_data_result.get("chartData")
 
             # 10. analyze_charts
-            print("\n[TEST] analyze_charts ...")
+            print("\nTesting analyze_charts...")
             result_obj = await session.call_tool("analyze_charts", {"chartData": chart_data, "question": QUESTION, "apiSettings": {"apiUrl": API_URL, "jwtToken": JWT_TOKEN}})
             analyze_charts_result = json.loads(result_obj.content[0].text)
             print("Result:", analyze_charts_result)
             insights = analyze_charts_result.get("insights")
 
             # 11. generate_summary
-            print("\n[TEST] generate_summary ...")
+            print("\nTesting generate_summary...")
             result_obj = await session.call_tool("generate_summary", {"insights": insights, "question": QUESTION, "strategy": strategy, "apiSettings": {"apiUrl": API_URL, "jwtToken": JWT_TOKEN}})
             summary_result = json.loads(result_obj.content[0].text)
             print("Result:", summary_result)

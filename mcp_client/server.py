@@ -14,11 +14,6 @@ session_data_map = {}
 # Create Flask app
 app = Flask(__name__)
 
-# Store the time of the last activity for idle timeout
-# This timeout will now apply to the entire MCP client process if no requests are received
-last_activity = time.time()
-IDLE_TIMEOUT = 3600  # 1 hour in seconds
-
 # We no longer need a single global mcp_manager or session_params
 # session_params = {}
 # mcp_manager = MCPServerManager()
@@ -57,28 +52,21 @@ def get_or_create_session_data(session_id):
             'mcp_manager': MCPServerManager(),
             'session_params': {}
         }
-        print(f"[MCP CLIENT] Created session data for session_id: {session_id}", flush=True)
     return session_data_map[session_id]
 
 # Helper function to clear session data
 def clear_session_data(session_id):
     if session_id in session_data_map:
-        # Stop the session's MCP server subprocess before deleting
         try:
-            session_data_map[session_id]['mcp_manager'].stop() # Use stop() method
-            print(f"[MCP CLIENT] Stopped MCP server for session_id: {session_id}", flush=True)
+            session_data_map[session_id]['mcp_manager'].stop()
         except Exception as e:
-            print(f"[MCP CLIENT] Error stopping MCP server for session_id {session_id}: {e}", flush=True)
-            
+            print(f"[ERROR] Failed to stop MCP server for session_id {session_id}: {e}", flush=True)
         del session_data_map[session_id]
-        print(f"[MCP CLIENT] Cleared session data for session_id: {session_id}", flush=True)
 
 # Health check endpoint
 @app.route('/health', methods=['GET'])
 def health():
     """Simple health check endpoint."""
-    global last_activity
-    last_activity = time.time()
     # This endpoint doesn't need session_id
     return jsonify({"status": "ok"})
 
@@ -90,9 +78,6 @@ def init():
     Stores them in memory per session and starts the per-session MCP server subprocess.
     Returns status.
     """
-    global last_activity
-    last_activity = time.time()
-    
     try:
         data = request.get_json(force=True)
         session_id = data.get('session_id')
@@ -130,9 +115,6 @@ def shutdown():
     Cleanly shut down the MCP client *session* and its server subprocess.
     Accepts JSON with session_id.
     """
-    global last_activity
-    last_activity = time.time()
-    
     try:
         data = request.get_json(force=True)
         session_id = data.get('session_id')
@@ -158,9 +140,6 @@ def list_tools():
     List available MCP tools for a specific session, filtering out sensitive parameters.
     Accepts JSON with session_id.
     """
-    global last_activity
-    last_activity = time.time()
-    
     try:
         data = request.get_json(force=True)
         session_id = data.get('session_id')
@@ -178,7 +157,68 @@ def list_tools():
         tools = mcp_manager.get_tool_schemas()
         # Filter each tool schema
         filtered_tools = [filter_tool_schema(tool) for tool in tools]
-        return jsonify({"tools": filtered_tools})
+
+        # Add general workflow guidance for LLMs
+        workflow_guidance = {
+            "workflow": {
+                "description": "This is a data analysis workflow that helps users analyze data sources and generate insights. The workflow has two main paths: one-shot analysis and step-by-step analysis.",
+                "steps": [
+                    {
+                        "step": 1,
+                        "description": "Source Selection",
+                        "guidance": "First, ask the user for a source name or part of a name to search. Use the 'list_sources' tool with the search parameter to find matching sources. Present the results to the user and ask them to select a specific source by its ID.",
+                        "tool": "list_sources"
+                    },
+                    {
+                        "step": 2,
+                        "description": "Source Structure Review",
+                        "guidance": "After source selection, use 'get_source_structure' to fetch detailed information about the source's columns and data types. Present this information to the user in a user-friendly format (e.g., markdown table). This helps users understand what data is available for analysis.",
+                        "tool": "get_source_structure"
+                    },
+                    {
+                        "step": 3,
+                        "description": "Question Formulation",
+                        "guidance": "Based on the source structure, help the user formulate a clear analytical question. Suggest possible questions that would have business value given the available data. Once the user provides their question, ask if they prefer: a) One-shot analysis (direct answer) or b) Step-by-step analysis (with configuration review).",
+                        "tools": ["analyze_source_question", "prepare_analysis_configuration"]
+                    },
+                    {
+                        "step": 4,
+                        "description": "Analysis Path Selection",
+                        "guidance": "Based on user preference: a) For one-shot analysis: Use 'analyze_source_question' to get direct results and inform user that it would take time to generate the results.. b) For step-by-step: Use 'prepare_analysis_configuration' to generate a dashboard configuration for review.",
+                        "tools": ["analyze_source_question", "prepare_analysis_configuration"]
+                    },
+                    {
+                        "step": 5,
+                        "description": "Configuration Review (Step-by-Step Only)",
+                        "guidance": "If using step-by-step analysis, present the generated dashboard configuration to the user in markdown format. Wait for their confirmation or modifications. If they make changes, use the modified configuration in the next step. If they confirm proposed configuration, don't add it to parameters in next call, it will use cached value",
+                        "tool": "prepare_analysis_configuration"
+                    },
+                    {
+                        "step": 6,
+                        "description": "Analysis Execution",
+                        "guidance": "a) For one-shot: Results are already available. b) For step-by-step: Use 'execute_analysis_from_config' with the confirmed/modified configuration to generate the final results. Inform user that it would take time to generate the results.",
+                        "tools": ["analyze_source_question", "execute_analysis_from_config"]
+                    },
+                    {
+                        "step": 7,
+                        "description": "Results Presentation",
+                        "guidance": "Present the final results to the user, including: 1) A clear summary of insights, 2) A link to the interactive dashboard, 3) Any relevant intermediate results if requested.",
+                        "tools": ["analyze_source_question", "execute_analysis_from_config"]
+                    }
+                ],
+                "important_notes": [
+                    "All data returned in responses or used as inputs is automatically cached - no need to repeat parameters in subsequent tool calls unless they've been modified",
+                    "Present technical information in user-friendly formats",
+                    "Wait for user confirmation at key decision points",
+                    "Offer suggestions and guidance based on the data structure"
+                ]
+            }
+        }
+
+        return jsonify({
+            "tools": filtered_tools,
+            "workflow_guidance": workflow_guidance
+        })
     except Exception as e:
         import traceback
         print(f"[MCP CLIENT] /tools error for session_id {data.get('session_id')}:", e, traceback.format_exc(), flush=True)
@@ -192,14 +232,17 @@ def call_tool():
     Caches all outputs from successful tool calls into the session.
     Accepts JSON with session_id, tool, and params.
     """
-    global last_activity
-    last_activity = time.time()
-
     try:
         data = request.get_json(force=True)
         session_id = data.get('session_id')
         tool_name = data.get('tool')
-        params = data.get('params', {})
+        
+        # Ensure params is a dictionary
+        params = data.get('params')
+        if params is None:
+            params = {}
+        elif not isinstance(params, dict):
+            return jsonify({"status": "error", "error": "params must be a dictionary"}), 400
         
         if not session_id or not tool_name:
              return jsonify({"status": "error", "error": "Missing session_id or tool name"}), 400
@@ -217,13 +260,10 @@ def call_tool():
                 params[key] = session_params[key]
 
         # 2. Generic injection of other parameters from session cache if not provided by the LLM
-        # This requires knowing the tool's schema to identify expected parameters.
-        # Note: Fetching tool schemas on every call is inefficient. Could cache this per session.
         try:
-            all_tool_schemas = mcp_manager.get_tool_schemas() # Get schemas for this session's manager
+            all_tool_schemas = mcp_manager.get_tool_schemas()
         except Exception as schema_e:
             print(f"[MCP CLIENT] Error fetching schemas for injection for session_id {session_id}: {schema_e}", flush=True)
-            # Proceed without schema injection if schemas can't be fetched
             all_tool_schemas = []
 
         target_tool_schema = next((s for s in all_tool_schemas if s.get("name") == tool_name), None)
@@ -232,30 +272,20 @@ def call_tool():
             input_schema_props = target_tool_schema.get("inputSchema", {}).get("properties", {})
             for param_name in input_schema_props.keys():
                 if param_name not in params and param_name in session_params:
-                    # Don't re-inject sensitive params if they were handled above or if they are explicitly SENSITIVE_PARAMS (already filtered from LLM view)
-                    # This also avoids injecting them if they were NOT in session_params during step 1 but are now in session_params from a previous tool's output.
                     if param_name not in ("jwtToken", "apiUrl"):
                         print(f"[MCP CLIENT] Parameter '{param_name}' for tool '{tool_name}' not in LLM call, injecting from session cache for session_id {session_id}.", flush=True)
                         params[param_name] = session_params[param_name]
                 elif param_name in params:
-                    # print(f"[MCP CLIENT] Parameter '{param_name}' for tool '{tool_name}' provided in LLM call, using explicit value for session_id {session_id}.", flush=True)
                     pass # Keep LLM provided value
         else:
             print(f"[MCP CLIENT] Warning: Could not find schema for tool '{tool_name}'. Skipping generic parameter injection for session_id {session_id}.", flush=True)
 
         # 3. Cache all current parameters (LLM-provided or client-injected) before calling the tool.
-        # This makes LLM-provided inputs (and client-injected values) available for subsequent, different tool calls if not overridden.
-        # print(f"[MCP CLIENT] Caching current input parameters for tool '{tool_name}' before execution for session_id {session_id}.", flush=True)
         for key, value in params.items():
-            # jwtToken and apiUrl are primarily managed via /init and Step 1 injection.
-            # We cache other LLM-provided or client-injected values here, ensuring they are serializable.
-            # Basic types are generally serializable; complex objects might cause issues.
-            if key not in ("jwtToken", "apiUrl"): # Don't overwrite init params from tool calls
+            if key not in ("jwtToken", "apiUrl"):
                  try:
-                     # Attempt to JSON serialize the value to check if it's cacheable
                      json.dumps(value)
                      session_data['session_params'][key] = value
-                     # print(f"[MCP CLIENT] Cached input param '{key}' into session cache for session_id {session_id}.", flush=True)
                  except TypeError:
                       print(f"[MCP CLIENT] Warning: Parameter '{key}' for tool '{tool_name}' is not JSON serializable. Not caching for session_id {session_id}.", flush=True)
 
@@ -264,28 +294,44 @@ def call_tool():
 
             # 4. Automatic caching of all outputs from successful tool calls
             if isinstance(result, dict) and result.get("status") == "success":
-                # print(f"[MCP CLIENT] Caching outputs from successful call to tool '{tool_name}' for session_id {session_id}.", flush=True)
+                # Cache everything including intermediate data
                 for key, value in result.items():
                     if key != "status": # Don't cache the status field itself
-                         try:
-                             # Attempt to JSON serialize the value before caching output
-                             json.dumps(value)
-                             session_data['session_params'][key] = value
-                             # print(f"[MCP CLIENT] Cached '{key}' from '{tool_name}' output into session cache for session_id {session_id}.", flush=True)
-                         except TypeError:
-                              print(f"[MCP CLIENT] Warning: Output key '{key}' from tool '{tool_name}' is not JSON serializable. Not caching for session_id {session_id}.", flush=True)
+                        try:
+                            json.dumps(value)
+                            if key == "intermediate" and isinstance(value, dict):
+                                # For intermediate data, cache each nested field separately
+                                for nested_key, nested_value in value.items():
+                                    try:
+                                        json.dumps(nested_value)
+                                        session_data['session_params'][nested_key] = nested_value
+                                    except TypeError:
+                                        print(f"[MCP CLIENT] Warning: Nested intermediate key '{nested_key}' from tool '{tool_name}' is not JSON serializable. Not caching for session_id {session_id}.", flush=True)
+                            else:
+                                # Cache non-intermediate fields as before
+                                session_data['session_params'][key] = value
+                        except TypeError:
+                            print(f"[MCP CLIENT] Warning: Output key '{key}' from tool '{tool_name}' is not JSON serializable. Not caching for session_id {session_id}.", flush=True)
 
+                # Create a filtered response without intermediate data
+                filtered_result = {k: v for k, v in result.items() if k != "intermediate"}
+                print(f"[MCP CLIENT RESPONSE] /call-tool response for session_id {session_id}, tool {tool_name}: {json.dumps(filtered_result)}", flush=True)
+                return jsonify(filtered_result)
+            
+            print(f"[MCP CLIENT RESPONSE] /call-tool response for session_id {session_id}, tool {tool_name}: {json.dumps(result)}", flush=True)
             return jsonify(result)
             
         except Exception as e:
-            # Basic error handling for the tool call itself
-            print(f"[MCP CLIENT] Error calling tool '{tool_name}' for session_id {session_id}: {e}", flush=True)
-            return jsonify({"status": "error", "error": f"Error executing tool '{tool_name}': {str(e)}"}), 500
+            error_response = {"status": "error", "error": f"Error executing tool '{tool_name}': {str(e)}"}
+            print(f"[MCP CLIENT RESPONSE] /call-tool error response for session_id {session_id}, tool {tool_name}: {json.dumps(error_response)}", flush=True)
+            return jsonify(error_response), 500
 
     except Exception as e:
         import traceback
         print(f"[MCP CLIENT] /call-tool error for session_id {data.get('session_id', 'N/A')}:", e, traceback.format_exc(), flush=True)
-        return jsonify({"error": str(e)}), 500
+        error_response = {"error": str(e)}
+        print(f"[MCP CLIENT RESPONSE] /call-tool error response for session_id {data.get('session_id', 'N/A')}: {json.dumps(error_response)}", flush=True)
+        return jsonify(error_response), 500
 
 def run_server():
     """
@@ -306,28 +352,6 @@ def run_server():
         sock.bind(('127.0.0.1', 0))
         port = sock.getsockname()[1]
         sock.close()
-
-    # Start idle timeout monitor in a background thread
-    # This timeout now applies to inactivity for *any* session.
-    def idle_monitor():
-        while True:
-            time.sleep(10)
-            # Check overall last activity timestamp
-            if time.time() - last_activity > IDLE_TIMEOUT:
-                print("[MCP CLIENT] Idle timeout reached. Shutting down.", flush=True)
-                
-                # Optionally, iterate through sessions and stop their managers gracefully first
-                # for sid in list(session_data_map.keys()): # Iterate over a copy of keys
-                #     try:
-                #         session_data_map[sid]['mcp_manager'].stop()
-                #         print(f"[MCP CLIENT] Stopped MCP server for session_id {sid} due to idle timeout.", flush=True)
-                #     except Exception as e:
-                #         print(f"[MCP CLIENT] Error stopping MCP server for session_id {sid} during idle shutdown: {e}", flush=True)
-                # session_data_map.clear() # Clear all session data map
-
-                os._exit(0)  # Force exit from any thread (main Flask process)
-
-    threading.Thread(target=idle_monitor, daemon=True).start()
 
     print(f"[MCP CLIENT] Flask server starting on port {port}", flush=True)
     # Flask app.run is blocking, so this is the main loop for the process.

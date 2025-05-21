@@ -31,16 +31,16 @@ import logging
 
 # Setup file logging
 logging.basicConfig(
-    filename="mcp_server_debug.log",
-    level=logging.INFO,
+    filename="mcp_server.log",
+    level=logging.WARNING,
     format="%(asctime)s [%(levelname)s] %(message)s",
     force=True
 )
-logging.info("[STARTUP] mcp_server.py: script started")
+logging.warning("[STARTUP] mcp_server.py: script started")
 
 # Create MCP server instance
 mcp = FastMCP("Insight Digger MCP")
-logging.info("[STARTUP] FastMCP instance created")
+logging.warning("[STARTUP] FastMCP instance created")
 
 # Helper: Get API base URL for the Flask server
 API_BASE_URL = os.getenv("INSIGHT_DIGGER_API_URL", "https://internal.sandsiv.com/data-narrator/api")
@@ -92,7 +92,7 @@ async def validate_settings(apiUrl: str, jwtToken: str) -> dict:
         return {"status": "error", "error": str(e)}
 # logging.info("Registered tool: validate_settings")
 
-@mcp.tool(description="List available data sources. This is typically the FIRST interactive step in data analysis. The user will select a source from this list, and its 'id' (returned in the 'data' array) will be used as 'sourceId' in other tools like 'prepare_analysis_configuration' or 'analyze_source_question'. Call this to allow the user to see and choose a data source. Use name provided by the user as 'search' parameter to filter the list. Consider limit and page parameters in case of many sources with names that fit the search. Returns: {{'count': int, 'data': [{'id': str, 'title': str, 'type': str, 'updated': str, 'numberOfColumns': int}]}}.")
+@mcp.tool(description="List available data sources. This is typically the FIRST interactive step in data analysis. The user will select a source from this list, and its 'id' (returned in the 'data' array) will be used as 'sourceId' in other tools like 'prepare_analysis_configuration' or 'analyze_source_question'. Call this to allow the user to see and choose a data source, but ask user to provie a source name to search first. Use name provided by the user as 'search' parameter to filter the list. Avoid using this tool without 'search' value. Consider limit and page parameters in case of many sources with names that fit the search. Returns: {{'count': int, 'data': [{'id': str, 'title': str, 'type': str, 'updated': str, 'numberOfColumns': int}]}}.")
 async def list_sources(apiUrl: str, jwtToken: str, search: str = "", page: int = 1, limit: int = 10) -> dict:
     """
     List available data sources from the external API, allowing the user to choose one for analysis.
@@ -138,27 +138,24 @@ async def get_source_structure(apiUrl: str, jwtToken: str, sourceId: str) -> dic
     headers = {"X-API-URL": apiUrl, "X-JWT-TOKEN": jwtToken}
     try:
         result = await get(f"/source/{sourceId}/structure", headers=headers)
-        return result
+        return {"status": "success", "sourceStructure": result}
     except Exception as e:
         logging.error(f"get_source_structure error: {repr(e)}")
         return {"status": "error", "error": str(e)}
 logging.info("Registered tool: get_source_structure")
 
-# @mcp.tool(description="Analyze columns for a given source structure and optional descriptions.")
-async def analyze_columns(sourceStructure: dict, columnDescriptions: dict = None) -> dict:
+@mcp.tool(description="Analyze columns for a given source structure. Returns: dict (column analysis results).")
+async def analyze_columns(sourceStructure: dict) -> dict:
     """
-    Analyze columns for a given source structure, optionally using provided column descriptions.
+    Analyze columns for a given source structure.
 
     Args:
         sourceStructure (dict): The structure/schema of the data source.
-        columnDescriptions (dict, optional): Optional descriptions for columns.
 
     Returns:
         dict: Column analysis results or error status.
     """
     payload = {"sourceStructure": sourceStructure}
-    if columnDescriptions:
-        payload["columnDescriptions"] = columnDescriptions
     try:
         result = await post("/analyze-columns", json=payload)
         if isinstance(result, list):
@@ -212,23 +209,20 @@ async def create_configuration(question: str, columnAnalysis: list, strategy: di
         return {"status": "error", "error": str(e)}
 # logging.info("Registered tool: create_configuration")
 
-#@mcp.tool(description="Generate dashboard config (markdown) from question and source structure.")
-async def generate_config(question: str, sourceStructure: dict, columnDescriptions: dict = None, apiSettings: dict = None) -> dict:
+@mcp.tool(description="Generate dashboard config (markdown) from question and source structure. Returns: dict (markdown configuration).")
+async def generate_config(question: str, sourceStructure: dict, apiSettings: dict = None) -> dict:
     """
     Generate a dashboard configuration (in markdown) from a question and source structure.
 
     Args:
         question (str): The analytical question to answer.
         sourceStructure (dict): The structure/schema of the data source.
-        columnDescriptions (dict, optional): Optional descriptions for columns.
         apiSettings (dict, optional): API settings for authentication.
 
     Returns:
         dict: Markdown configuration or error status.
     """
     payload = {"question": question, "sourceStructure": sourceStructure}
-    if columnDescriptions:
-        payload["columnDescriptions"] = columnDescriptions
     if apiSettings:
         payload["apiSettings"] = apiSettings
     try:
@@ -335,8 +329,7 @@ async def analyze_source_question(
     apiUrl: str,
     jwtToken: str,
     sourceId: str,
-    question: str,
-    columnDescriptions: dict = None
+    question: str
 ) -> dict:
     """
     Run the full analysis workflow for a given source and question (one-shot tool).
@@ -357,7 +350,6 @@ async def analyze_source_question(
         jwtToken (str): JWT token for authentication. (Handled by MCP Client)
         sourceId (str): ID of the data source to analyze (selected by user).
         question (str): Analytical question to answer (formulated by user).
-        columnDescriptions (dict, optional): Optional column descriptions.
 
     Returns:
         dict: {
@@ -382,8 +374,6 @@ async def analyze_source_question(
 
         # Step 2: Analyze columns
         payload = {"sourceStructure": source_structure}
-        if columnDescriptions:
-            payload["columnDescriptions"] = columnDescriptions
         column_analysis_resp = await post("/analyze-columns", json=payload, timeout=LONG_TIMEOUT)
         if column_analysis_resp.get("status") != "success":
             return {"status": "error", "error": column_analysis_resp.get("error", "Column analysis failed")}
@@ -456,13 +446,12 @@ logging.info("Registered tool: analyze_source_question")
 
 # --- New Step-by-Step Tools ---
 
-@mcp.tool(description="STEP 1 of 2-STEP ANALYSIS: Analyzes 'sourceId' and 'question' to generate a 'markdownConfig' (dashboard configuration text) for user review. Also returns 'sourceStructure', 'columnAnalysis', and 'strategy' which are needed for STEP 2 ('execute_analysis_from_config'). Use this when the user wants to inspect or modify the analysis plan before execution. Returns: {{'status': 'success'|'error', 'markdownConfig': str, 'sourceStructure': dict, 'columnAnalysis': list, 'strategy': dict}}. Present 'markdownConfig' to the user for review/modification. The other returned fields are for context and can be used for explaining the proposed dashboard configuration logic to the user.")
+@mcp.tool(description="STEP 1 of 2-STEP ANALYSIS: Analyzes 'sourceId' and 'question' to generate a 'markdownConfig' (dashboard configuration text) for user review. Also returns 'sourceStructure', 'columnAnalysis', and 'strategy' which are needed for STEP 2 ('execute_analysis_from_config'). Use this when the user wants to inspect or modify the analysis plan before execution. When returning the 'markdownConfig' to the user, present it as a markdown formatted text, not as a JSON object and wait for user's response. Returns: {{'status': 'success'|'error', 'markdownConfig': str}}. Present 'markdownConfig' to the user for review/modification.")
 async def prepare_analysis_configuration(
     apiUrl: str,
     jwtToken: str,
     sourceId: str,
-    question: str,
-    columnDescriptions: dict = None
+    question: str
 ) -> dict:
     """
     Analyzes the source data structure and the user's question to generate a
@@ -471,7 +460,7 @@ async def prepare_analysis_configuration(
 
     Internally, this tool:
         1. Fetches source structure for the given 'sourceId'.
-        2. Analyzes columns (optionally using 'columnDescriptions').
+        2. Analyzes columns.
         3. Generates an analysis 'strategy' based on the 'question' and column analysis.
         4. Creates the 'markdownConfig' based on the 'question', column analysis, and 'strategy'.
 
@@ -480,15 +469,16 @@ async def prepare_analysis_configuration(
         jwtToken (str): JWT token for authentication. (Handled by MCP Client)
         sourceId (str): ID of the data source to analyze (selected by user).
         question (str): Analytical question to answer (formulated by user).
-        columnDescriptions (dict, optional): Optional user-provided descriptions for columns to refine analysis.
 
     Returns:
         dict: {
             "status": "success" | "error",
             "markdownConfig": str,       // The generated dashboard configuration in markdown format. LLM should present this to the user for review and potential modification.
-            "sourceStructure": dict,     // The source structure used for this configuration. Needed if calling 'execute_analysis_from_config' next.
-            "columnAnalysis": list,      // Results from the internal column analysis.
-            "strategy": dict,            // The generated analysis strategy. Needed if calling 'execute_analysis_from_config' next.
+            "intermediate": {            // Internal data needed for subsequent steps, not shown to LLM
+                "sourceStructure": dict, // The source structure used for this configuration
+                "columnAnalysis": list,  // Results from the internal column analysis
+                "strategy": dict         // The generated analysis strategy
+            },
             "error": str (if status == "error")
         }
         The LLM should present 'markdownConfig' to the user. If the user approves or modifies it, then 'execute_analysis_from_config' should be called next, passing the (potentially modified) 'markdownConfig', along with the 'question', 'sourceStructure', and 'strategy' returned by this tool.
@@ -502,8 +492,6 @@ async def prepare_analysis_configuration(
 
         # Step 2: Analyze columns
         payload_analyze_cols = {"sourceStructure": source_structure}
-        if columnDescriptions:
-            payload_analyze_cols["columnDescriptions"] = columnDescriptions
         column_analysis_resp = await post("/analyze-columns", json=payload_analyze_cols, timeout=LONG_TIMEOUT)
         if column_analysis_resp.get("status") != "success":
             return {"status": "error", "error": column_analysis_resp.get("error", "Column analysis failed during preparation"), "intermediate": intermediate_results}
@@ -527,9 +515,7 @@ async def prepare_analysis_configuration(
         return {
             "status": "success",
             "markdownConfig": markdown_config,
-            "sourceStructure": source_structure,
-            "columnAnalysis": column_analysis,
-            "strategy": strategy
+            "intermediate": intermediate_results
         }
     except Exception as e:
         logging.error(f"prepare_analysis_configuration error: {repr(e)}")

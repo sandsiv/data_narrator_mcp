@@ -33,22 +33,22 @@ base_url = f"http://127.0.0.1:{PORT}"
 
 try:
     # Wait for /health to respond (server readiness)
-    print(f"[TEST] Waiting for server on port {PORT} to respond...")
+    print(f"Waiting for server on port {PORT}...")
     for _ in range(30):
         try:
             resp = requests.get(f"{base_url}/health", timeout=0.5)
             if resp.status_code == 200:
-                print("[MCP CLIENT] /health responded OK")
+                print("Server ready")
                 break
         except Exception:
             pass
         time.sleep(0.5)
     else:
-        print(f"MCP client server did not respond to /health on port {PORT} in time. Is it running?")
+        print(f"Server did not respond on port {PORT} in time")
         exit(1)
 
     # 1. POST /init for a specific session
-    print(f"\n[TEST] /init for session {SESSION_ID}...")
+    print(f"\nInitializing session {SESSION_ID}...")
     init_payload = {
         "session_id": SESSION_ID,
         "apiUrl": API_URL,
@@ -56,24 +56,24 @@ try:
     }
     resp = requests.post(f"{base_url}/init", json=init_payload)
     init_response = resp.json()
-    print("Result:", init_response)
+    print("Init result:", init_response)
     if init_response.get("status") != "ok":
-        print("Error during /init, aborting test.")
+        print("Error during initialization, aborting test.")
         exit(1)
 
     # 2. POST /tools for the specific session
-    # Changed to POST to send session_id
-    print(f"\n[TEST] /tools for session {SESSION_ID}...")
+    print(f"\nFetching tools for session {SESSION_ID}...")
     tools_payload = {"session_id": SESSION_ID}
     resp = requests.post(f"{base_url}/tools", json=tools_payload)
     tools_json = resp.json()
-    print("Result:", tools_json)
+    print("Tools result:", tools_json)
 
     # Show what LLM would get for tool descriptions
-    print("\n[LLM TOOL DESCRIPTIONS JSON]\n" + json.dumps(tools_json, indent=2))
+    print("\nTool descriptions:")
+    print(json.dumps(tools_json, indent=2))
 
     # 3. POST /call-tool (list_sources) for the specific session
-    print(f"\n[TEST] /call-tool (list_sources with search) for session {SESSION_ID}...")
+    print(f"\nTesting list_sources for session {SESSION_ID}...")
     list_sources_payload = {
         "session_id": SESSION_ID, # Add session_id
         "tool": "list_sources",
