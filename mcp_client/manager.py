@@ -6,6 +6,7 @@ from mcp.client.stdio import stdio_client
 import asyncio
 import sys
 import concurrent.futures
+import os
 
 class MCPServerManager:
     """
@@ -57,8 +58,12 @@ class MCPServerManager:
             self.session_ready.set()  # Unblock waiting threads
 
     async def _session_lifetime(self, api_env):
+        # Get the path to the virtual environment's bin directory
+        venv_bin = os.path.dirname(sys.executable)
+        mcp_cmd = os.path.join(venv_bin, "mcp")
+        
         server_params = StdioServerParameters(
-            command="mcp",
+            command=mcp_cmd,
             args=["run", self.server_script],
             env=api_env
         )
