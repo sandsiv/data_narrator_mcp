@@ -3,10 +3,10 @@
     After=network.target
 
     [Service]
-    User=your_user # Replace with the user you want to run the service as
-    WorkingDirectory=/home/denter/app/insight_digger_mcp/ # Replace with the actual path to the insight-digger directory
-    ExecStart=/usr/bin/python -u -m mcp_client.server
-    Environment="MCP_CLIENT_PORT=33000" # Set your desired fixed port here
+    User=denter
+    WorkingDirectory=/home/denter/app/insight_digger_mcp
+    ExecStart=/home/denter/app/insight_digger_mcp/venv/bin/python -u -m mcp_client.server
+    Environment="MCP_CLIENT_PORT=33000"
     Restart=always
 
     [Install]

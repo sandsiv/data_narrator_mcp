@@ -1,7 +1,6 @@
-fastmcp
+fastmcp>=2.2.0
 Flask>=2.0
 httpx
 mcp
 python-dotenv
 requests
-python-dotenv
