@@ -31,7 +31,7 @@ import logging
 
 # Setup file logging
 logging.basicConfig(
-    filename="mcp_server.log",
+    filename="/tmp/mcp_server.log",
     level=logging.WARNING,
     format="%(asctime)s [%(levelname)s] %(message)s",
     force=True
