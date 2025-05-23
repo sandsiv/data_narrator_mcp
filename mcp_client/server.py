@@ -184,7 +184,7 @@ def list_tools():
                     {
                         "step": 4,
                         "description": "Analysis Path Selection",
-                        "guidance": "Based on user preference: a) For one-shot analysis: Use 'analyze_source_question' to get direct results and inform user that it would take time to generate the results.. b) For step-by-step: Use 'prepare_analysis_configuration' to generate a dashboard configuration for review.",
+                        "guidance": "Based on user preference: a) For one-shot analysis: Use 'analyze_source_question' to get direct results and inform user that it would take time to generate the results. b) For step-by-step: Use 'prepare_analysis_configuration' to generate a dashboard configuration for review.",
                         "tools": ["analyze_source_question", "prepare_analysis_configuration"]
                     },
                     {
@@ -202,15 +202,22 @@ def list_tools():
                     {
                         "step": 7,
                         "description": "Results Presentation",
-                        "guidance": "Present the final results to the user, including: 1) A clear summary of insights, 2) A link to the interactive dashboard, 3) Any relevant intermediate results if requested.",
+                        "guidance": "Present the final results to the user, including: 1) A clear summary of insights, 2) A link to the interactive dashboard, 3) Any relevant intermediate results if requested. Inform user that he can modify charts in the dashboard and ask to run analysis again.",
                         "tools": ["analyze_source_question", "execute_analysis_from_config"]
+                    },
+                    {
+                        "step": 8,
+                        "description": "Dashboard Reanalysis",
+                        "guidance": "If the user has modified charts in the dashboard and wants to run analysis again, use 'reanalyze_dashboard' to generate fresh insights based on the modified charts. This tool will use the cached dashboard URL and chart configurations from the previous analysis. Present the new summary to the user.",
+                        "tool": "reanalyze_dashboard"
                     }
                 ],
                 "important_notes": [
                     "All data returned in responses or used as inputs is automatically cached - no need to repeat parameters in subsequent tool calls unless they've been modified",
                     "Present technical information in user-friendly formats",
                     "Wait for user confirmation at key decision points",
-                    "Offer suggestions and guidance based on the data structure"
+                    "Offer suggestions and guidance based on the data structure",
+                    "After dashboard modifications, use reanalyze_dashboard to get fresh insights without recreating the dashboard"
                 ]
             }
         }
@@ -280,44 +287,40 @@ def call_tool():
         else:
             print(f"[MCP CLIENT] Warning: Could not find schema for tool '{tool_name}'. Skipping generic parameter injection for session_id {session_id}.", flush=True)
 
-        # 3. Cache all current parameters (LLM-provided or client-injected) before calling the tool.
-        for key, value in params.items():
-            if key not in ("jwtToken", "apiUrl"):
-                 try:
-                     json.dumps(value)
-                     session_data['session_params'][key] = value
-                 except TypeError:
-                      print(f"[MCP CLIENT] Warning: Parameter '{key}' for tool '{tool_name}' is not JSON serializable. Not caching for session_id {session_id}.", flush=True)
-
         try:
             result = mcp_manager.call_tool(tool_name, params)
 
-            # 4. Automatic caching of all outputs from successful tool calls
-            if isinstance(result, dict) and result.get("status") == "success":
-                # Cache everything including intermediate data
-                for key, value in result.items():
-                    if key != "status": # Don't cache the status field itself
-                        try:
-                            json.dumps(value)
-                            if key == "intermediate" and isinstance(value, dict):
-                                # For intermediate data, cache each nested field separately
-                                for nested_key, nested_value in value.items():
-                                    try:
-                                        json.dumps(nested_value)
-                                        session_data['session_params'][nested_key] = nested_value
-                                    except TypeError:
-                                        print(f"[MCP CLIENT] Warning: Nested intermediate key '{nested_key}' from tool '{tool_name}' is not JSON serializable. Not caching for session_id {session_id}.", flush=True)
-                            else:
-                                # Cache non-intermediate fields as before
-                                session_data['session_params'][key] = value
-                        except TypeError:
-                            print(f"[MCP CLIENT] Warning: Output key '{key}' from tool '{tool_name}' is not JSON serializable. Not caching for session_id {session_id}.", flush=True)
+            # Cache all outputs from successful tool calls if the result is a dictionary
+            if isinstance(result, dict):
+                # Only cache on success status, or if the intermediate key specifically exists?
+                # Let's cache on success for now, based on previous logic intention.
+                # If the tool returns intermediate data on error, we don't cache it.
+                if result.get("status") == "success":
+                    # Cache everything including intermediate data
+                    for key, value in result.items():
+                        if key != "status": # Don't cache the status field itself
+                            try:
+                                json.dumps(value) # Check if serializable before caching
+                                if key == "intermediate" and isinstance(value, dict):
+                                    # For intermediate data, cache each nested field separately
+                                    for nested_key, nested_value in value.items():
+                                        try:
+                                            json.dumps(nested_value) # Check nested serializability
+                                            session_data['session_params'][nested_key] = nested_value
+                                        except TypeError:
+                                            print(f"[MCP CLIENT] Warning: Nested intermediate key '{nested_key}' from tool '{tool_name}' is not JSON serializable. Not caching for session_id {session_id}.", flush=True)
+                                else:
+                                    # Cache non-intermediate fields as before
+                                    session_data['session_params'][key] = value
+                            except TypeError:
+                                print(f"[MCP CLIENT] Warning: Output key '{key}' from tool '{tool_name}' is not JSON serializable. Not caching for session_id {session_id}.", flush=True)
 
-                # Create a filtered response without intermediate data
+                # Always create a filtered response without intermediate data if the result is a dict
                 filtered_result = {k: v for k, v in result.items() if k != "intermediate"}
                 print(f"[MCP CLIENT RESPONSE] /call-tool response for session_id {session_id}, tool {tool_name}: {json.dumps(filtered_result)}", flush=True)
                 return jsonify(filtered_result)
             
+            # If result is not a dictionary (e.g., simple type), return as is
             print(f"[MCP CLIENT RESPONSE] /call-tool response for session_id {session_id}, tool {tool_name}: {json.dumps(result)}", flush=True)
             return jsonify(result)
             

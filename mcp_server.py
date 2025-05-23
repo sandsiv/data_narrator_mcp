@@ -360,9 +360,12 @@ async def analyze_source_question(
                 "columnAnalysis": list,
                 "strategy": dict,
                 "configuration": str,     // The markdown configuration used
-                "dashboard": {"dashboardUrl": str, "charts": list},
-                "chartData": {"chartData": dict, "errors": list},
-                "insights": {"insights": list, "errors": list}
+                "dashboard": {"dashboardUrl": str},
+                "charts": list,
+                "chartData": dict,
+                "chartErrors": list,
+                "insights": list,
+                "insightsErrors": list
             }
         } or error status.
         The LLM should primarily present the 'summary' and 'dashboardUrl' to the user.
@@ -434,9 +437,12 @@ async def analyze_source_question(
                 "columnAnalysis": column_analysis,
                 "strategy": strategy,
                 "configuration": config,
-                "dashboard": {"dashboardUrl": dashboard_url, "charts": charts},
-                "chartData": {"chartData": chart_data, "errors": chart_errors},
-                "insights": {"insights": insights, "errors": insights_errors}
+                "dashboard": {"dashboardUrl": dashboard_url},
+                "charts": charts,
+                "chartData": chart_data,
+                "chartErrors": chart_errors,
+                "insights": insights,
+                "insightsErrors": insights_errors
             }
         }
     except Exception as e:
@@ -446,7 +452,7 @@ logging.info("Registered tool: analyze_source_question")
 
 # --- New Step-by-Step Tools ---
 
-@mcp.tool(description="STEP 1 of 2-STEP ANALYSIS: Analyzes 'sourceId' and 'question' to generate a 'markdownConfig' (dashboard configuration text) for user review. Also returns 'sourceStructure', 'columnAnalysis', and 'strategy' which are needed for STEP 2 ('execute_analysis_from_config'). Use this when the user wants to inspect or modify the analysis plan before execution. When returning the 'markdownConfig' to the user, present it as a markdown formatted text, not as a JSON object and wait for user's response. Returns: {{'status': 'success'|'error', 'markdownConfig': str}}. Present 'markdownConfig' to the user for review/modification.")
+@mcp.tool(description="STEP 1 of 2-STEP ANALYSIS: Analyzes 'sourceId' and 'question' to generate a 'markdownConfig' (dashboard configuration text) for user review. Also returns 'sourceStructure', 'columnAnalysis', and 'strategy' which are needed for STEP 2 ('execute_analysis_from_config'). Use this when the user wants to inspect or modify the analysis plan before execution. When returning the 'markdownConfig' to the user, present it as a markdown formatted text, not as a JSON object and ask for user's response. Returns: {{'status': 'success'|'error', 'markdownConfig': str}}. Present 'markdownConfig' to the user for review/modification.")
 async def prepare_analysis_configuration(
     apiUrl: str,
     jwtToken: str,
@@ -563,7 +569,8 @@ async def execute_analysis_from_config(
             return {"status": "error", "error": dashboard_resp.get("error", "Dashboard creation failed during execution"), "intermediate": intermediate_results}
         dashboard_url = dashboard_resp["dashboardUrl"]
         charts = dashboard_resp["charts"]
-        intermediate_results["dashboard"] = {"dashboardUrl": dashboard_url, "charts": charts}
+        intermediate_results["dashboardUrl"] = dashboard_url # Expose dashboardUrl at intermediate top level
+        intermediate_results["charts"] = charts # Expose charts list at intermediate top level
 
         # Step 2: Get chart data (corresponds to original step 6)
         chart_data_resp = await post("/charts/data", json={"chartConfigs": charts, "apiSettings": api_settings}, timeout=LONG_TIMEOUT)
@@ -579,7 +586,8 @@ async def execute_analysis_from_config(
             return {"status": "error", "error": insights_resp.get("error", "Chart analysis failed during execution"), "intermediate": intermediate_results}
         insights = insights_resp["insights"]
         insights_errors = insights_resp.get("errors", [])
-        intermediate_results["insights"] = {"insights": insights, "errors": insights_errors}
+        intermediate_results["insights"] = insights # Expose insights list at intermediate top level
+        intermediate_results["insightsErrors"] = insights_errors # Expose insights errors at intermediate top level
 
         # Step 4: Generate summary (corresponds to original step 8)
         all_errors = chart_errors + insights_errors
@@ -607,6 +615,85 @@ async def execute_analysis_from_config(
         logging.error(f"execute_analysis_from_config error: {repr(e)}")
         return {"status": "error", "error": str(e), "intermediate": intermediate_results}
 logging.info("Registered tool: execute_analysis_from_config")
+
+@mcp.tool(description="Reanalyze an existing dashboard after user modifications. This tool should be called AFTER 'execute_analysis_from_config' or 'analyze_source_question' when the user has modified charts in the dashboard and wants fresh analysis. The tool will use the cached dashboardUrl and charts from the previous analysis. Returns: {{'status': 'success'|'error', 'summary': str, 'dashboardUrl': str, 'intermediate': {{...}}}}. Present 'summary' to the user.")
+async def reanalyze_dashboard(
+    apiUrl: str,
+    jwtToken: str,
+    question: str,
+    strategy: dict,
+    charts: list,  # Required from cache
+    dashboardUrl: str  # Required from cache
+) -> dict:
+    """
+    Reanalyze an existing dashboard after user modifications.
+    This tool assumes the dashboard already exists and has been modified by the user.
+    It will fetch fresh data for the modified charts and generate new insights.
+
+    Args:
+        apiUrl (str): The base URL of the external API. (Handled by MCP Client)
+        jwtToken (str): JWT token for authentication. (Handled by MCP Client)
+        question (str): The original analytical question.
+        strategy (dict): The analysis strategy from the original analysis.
+        charts (list): List of chart configurations from the previous analysis (cached).
+        dashboardUrl (str): URL of the existing dashboard (cached).
+
+    Returns:
+        dict: {
+            "status": "success" | "error",
+            "summary": str,          // New textual answer/insight based on modified charts
+            "dashboardUrl": str,     // Link to the modified dashboard
+            "intermediate": dict,    // Detailed intermediate results (charts, data, insights)
+            "error": str (if status == "error")
+        }
+        The LLM should primarily present the 'summary' to the user.
+    """
+    api_settings = {"apiUrl": apiUrl, "jwtToken": jwtToken}
+    intermediate_results = {}
+    try:
+        # Step 1: Get chart data (using cached charts)
+        chart_data_resp = await post("/charts/data", json={"chartConfigs": charts, "apiSettings": api_settings}, timeout=LONG_TIMEOUT)
+        if chart_data_resp.get("status") != "success":
+            return {"status": "error", "error": chart_data_resp.get("error", "Chart data fetch failed during reanalysis"), "intermediate": intermediate_results}
+        chart_data = chart_data_resp["chartData"]
+        chart_errors = chart_data_resp.get("errors", [])
+        intermediate_results["chartData"] = {"chartData": chart_data, "errors": chart_errors}
+
+        # Step 2: Analyze charts
+        insights_resp = await post("/analyze-charts", json={"chartData": chart_data, "question": question, "apiSettings": api_settings}, timeout=LONG_TIMEOUT)
+        if insights_resp.get("status") != "success":
+            return {"status": "error", "error": insights_resp.get("error", "Chart analysis failed during reanalysis"), "intermediate": intermediate_results}
+        insights = insights_resp["insights"]
+        insights_errors = insights_resp.get("errors", [])
+        intermediate_results["insights"] = insights
+        intermediate_results["insightsErrors"] = insights_errors
+
+        # Step 3: Generate summary
+        all_errors = chart_errors + insights_errors
+        summary_payload = {
+            "insights": insights,
+            "question": question,
+            "strategy": strategy,
+            "apiSettings": api_settings
+        }
+        if all_errors:
+            summary_payload["errors"] = all_errors
+
+        summary_resp = await post("/generate-summary", json=summary_payload, timeout=LONG_TIMEOUT)
+        if summary_resp.get("status") != "success":
+            return {"status": "error", "error": summary_resp.get("error", "Summary generation failed during reanalysis"), "intermediate": intermediate_results}
+        summary = summary_resp["summary"]
+
+        return {
+            "status": "success",
+            "summary": summary,
+            "dashboardUrl": dashboardUrl,  # Use provided dashboard URL
+            "intermediate": intermediate_results
+        }
+    except Exception as e:
+        logging.error(f"reanalyze_dashboard error: {repr(e)}")
+        return {"status": "error", "error": str(e), "intermediate": intermediate_results}
+logging.info("Registered tool: reanalyze_dashboard")
 
 # Print all registered tools after all definitions
 print("[DEBUG] All tools registered:", list(getattr(mcp, "_tools", {}).keys()))
