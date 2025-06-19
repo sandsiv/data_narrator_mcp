@@ -16,7 +16,7 @@ QUESTION = os.getenv("question", "What are the top sales?")
 # The test client now expects the server to be running on a fixed port
 # Set MCP_CLIENT_PORT environment variable before running the test
 PORT = int(os.getenv("MCP_CLIENT_PORT", 33000)) # Default to 33000 if env var not set
-SESSION_ID = os.getenv("SESSION_ID", "test-session-123") # Unique ID for this test run
+SESSION_ID = os.getenv("SESSION_ID", "test-session-125") # Unique ID for this test run
 # --- End New Configuration ---
 
 # We no longer start/stop the server process from the test client itself.

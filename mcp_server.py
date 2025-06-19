@@ -129,7 +129,20 @@ async def list_sources(apiUrl: str, jwtToken: str, search: str = "", page: int =
         return {"status": "error", "error": str(e)}
 logging.info("Registered tool: list_sources")
 
-@mcp.tool(description="Get detailed structure (columns, data types) for a specific 'sourceId'. Call this AFTER the user selects a 'sourceId' from 'list_sources', if they need more details about the data before formulating a question or if 'columnDescriptions' are planned for 'prepare_analysis_configuration'. The output (source schema) can be presented to the user in user friendly way (e.g. markdown table). Returns: dict (source structure schema).")
+@mcp.tool(description="""
+Get detailed structure (columns, data types) for a specific 'sourceId'.
+
+**IMPORTANT:** 
+- You MUST provide the 'sourceId' parameter explicitly when calling this tool.
+- To obtain a valid 'sourceId', first call 'list_sources' and select the desired source from the returned list (each source has an 'id' field).
+- Pass the selected 'id' as 'sourceId' in this tool's parameters.
+
+Call this tool AFTER the user selects a 'sourceId' from 'list_sources', if they need more details about the data before formulating a question or if 'columnDescriptions' are planned for 'prepare_analysis_configuration'.
+
+The output (source schema) can be presented to the user in a user-friendly way (e.g., markdown table).
+
+Returns: dict (source structure schema).
+""")
 async def get_source_structure(apiUrl: str, jwtToken: str, sourceId: str) -> dict:
     """
     Retrieve the structure/schema for a specified data source.
