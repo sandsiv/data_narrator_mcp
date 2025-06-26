@@ -7,6 +7,10 @@ import socket
 from mcp_client.manager import MCPServerManager
 import copy
 import json
+import requests
+from urllib.parse import urlparse
+from functools import wraps
+from collections import defaultdict
 
 # Dictionary to store session-specific data, keyed by session_id
 session_data_map = {}
@@ -20,6 +24,87 @@ app = Flask(__name__)
 
 # Configurable list of sensitive parameter names to filter out
 SENSITIVE_PARAMS = os.getenv("MCP_SENSITIVE_PARAMS", "apiUrl,jwtToken").split(",")
+
+# Get API base URL (same as mcp_server.py)
+API_BASE_URL = os.getenv("INSIGHT_DIGGER_API_URL", "https://internal.sandsiv.com/data-narrator/api")
+
+def validate_api_url(url):
+    """Validate API URL format."""
+    try:
+        parsed = urlparse(url)
+        if not all([parsed.scheme, parsed.netloc]):
+            return False
+        if parsed.scheme not in ['http', 'https']:
+            return False
+        return True
+    except:
+        return False
+
+def validate_jwt_token(token):
+    """Basic JWT token format validation."""
+    if not token or not isinstance(token, str):
+        return False
+    parts = token.split('.')
+    return len(parts) == 3
+
+def validate_credentials_direct(api_url, jwt_token):
+    """
+    Validate credentials by calling the API directly (without MCP server).
+    Returns: (is_valid: bool, error_message: str)
+    """
+    try:
+        # Input validation
+        if not validate_api_url(api_url):
+            return False, "Invalid API URL format"
+        
+        if not validate_jwt_token(jwt_token):
+            return False, "Invalid JWT token format"
+        
+        # Make validation request (same as validate_settings tool)
+        validation_url = f"{API_BASE_URL}/settings/validate"
+        payload = {"apiUrl": api_url, "jwtToken": jwt_token}
+        
+        response = requests.post(
+            validation_url, 
+            json=payload, 
+            timeout=5  # 5 second timeout as requested
+        )
+        response.raise_for_status()
+        
+        result = response.json()
+        
+        # Check for success response
+        if result.get("status") == "success":
+            return True, None
+        
+        # Handle error response from API
+        if result.get("status") == "error":
+            error_msg = result.get("error", "Authentication failed")
+            return False, error_msg
+        
+        # Unexpected response format
+        return False, "Unexpected response from validation service"
+        
+    except requests.exceptions.Timeout:
+        return False, "Validation request timed out"
+    except requests.exceptions.ConnectionError:
+        return False, "Cannot connect to validation service"
+    except requests.exceptions.HTTPError as e:
+        return False, f"HTTP error during validation: {e}"
+    except Exception as e:
+        return False, f"Validation error: {str(e)}"
+
+def is_session_active(session_id):
+    """Check if session exists and has an active MCP manager."""
+    session_data = session_data_map.get(session_id)
+    if not session_data:
+        return False
+    
+    mcp_manager = session_data.get('mcp_manager')
+    if not mcp_manager or not mcp_manager.session:
+        return False
+    
+    return True
 
 def filter_tool_schema(tool_schema, sensitive_params=None):
     """
@@ -73,10 +158,14 @@ def health():
 @app.route('/init', methods=['POST'])
 def init():
     """
-    Initialize the MCP client session.
+    Initialize the MCP client session with secure credential validation.
     Accepts JSON with session_id, apiUrl, jwtToken, and other params.
-    Stores them in memory per session and starts the per-session MCP server subprocess.
-    Returns status.
+    
+    Security Flow:
+    1. Check if session already exists and is active → return success immediately
+    2. Validate credentials directly (5sec timeout) → return 401 if invalid  
+    3. Create MCP server instance only if credentials are valid
+    4. Store credentials and return success
     """
     try:
         data = request.get_json(force=True)
@@ -87,14 +176,32 @@ def init():
         if not session_id or not apiUrl or not jwtToken:
             return jsonify({"status": "error", "error": "Missing session_id, apiUrl, or jwtToken"}), 400
 
-        session_data = get_or_create_session_data(session_id)
+        # SECURITY: Check if session already exists and is active
+        if is_session_active(session_id):
+            print(f"[MCP CLIENT] Session {session_id} already active, returning success", flush=True)
+            return jsonify({"status": "ok"})
+
+        # SECURITY: Validate credentials directly before creating MCP server
+        print(f"[MCP CLIENT] Validating credentials for session_id: {session_id}", flush=True)
+        is_valid, error_message = validate_credentials_direct(apiUrl, jwtToken)
         
-        # Store API credentials and any other init params in session-specific memory
+        if not is_valid:
+            print(f"[MCP CLIENT] Credential validation failed for session_id {session_id}: {error_message}", flush=True)
+            
+            # Determine if it's an authentication error (401) or server error (500)
+            if any(keyword in error_message.lower() for keyword in ['forbidden', '403', 'authentication', 'credentials', 'token']):
+                return jsonify({"status": "error", "error": error_message}), 401
+            else:
+                return jsonify({"status": "error", "error": error_message}), 500
+
+        print(f"[MCP CLIENT] Credentials validated successfully for session_id: {session_id}", flush=True)
+
+        # Create session data and store credentials
+        session_data = get_or_create_session_data(session_id)
         session_data['session_params'].clear() # Clear previous session params
         session_data['session_params'].update(data) # Store all init data
         
-        # Start the per-session MCP server manager
-        # Pass API credentials to the manager if needed during its start
+        # Start the per-session MCP server manager (only after successful validation)
         try:
             session_data['mcp_manager'].start() # Manager starts the subprocess for this session
             print(f"[MCP CLIENT] MCP Manager started for session_id: {session_id}", flush=True)
@@ -161,63 +268,60 @@ def list_tools():
         # Add general workflow guidance for LLMs
         workflow_guidance = {
             "workflow": {
-                "description": "This is a data analysis workflow that helps users analyze data sources and generate insights. The workflow has two main paths: one-shot analysis and step-by-step analysis.",
-                "steps": [
-                    {
-                        "step": 1,
-                        "description": "Source Selection",
-                        "guidance": "First, ask the user for a source name or part of a name to search. Use the 'list_sources' tool with the search parameter to find matching sources. Present the results to the user and ask them to select a specific source by its ID.",
-                        "tool": "list_sources"
-                    },
-                    {
-                        "step": 2,
-                        "description": "Source Structure Review",
-                        "guidance": "After source selection, use 'get_source_structure' to fetch detailed information about the source's columns and data types. Present this information to the user in a user-friendly format (e.g., markdown table). This helps users understand what data is available for analysis.",
-                        "tool": "get_source_structure"
-                    },
-                    {
-                        "step": 3,
-                        "description": "Question Formulation",
-                        "guidance": "Based on the source structure, help the user formulate a clear analytical question. Suggest possible questions that would have business value given the available data. Once the user provides their question, ask if they prefer: a) One-shot analysis (direct answer) or b) Step-by-step analysis (with configuration review).",
-                        "tools": ["analyze_source_question", "prepare_analysis_configuration"]
-                    },
-                    {
-                        "step": 4,
-                        "description": "Analysis Path Selection",
-                        "guidance": "Based on user preference: a) For one-shot analysis: Use 'analyze_source_question' to get direct results and inform user that it would take time to generate the results. b) For step-by-step: Use 'prepare_analysis_configuration' to generate a dashboard configuration for review.",
-                        "tools": ["analyze_source_question", "prepare_analysis_configuration"]
-                    },
-                    {
-                        "step": 5,
-                        "description": "Configuration Review (Step-by-Step Only)",
-                        "guidance": "If using step-by-step analysis, present the generated dashboard configuration to the user in markdown format. Wait for their confirmation or modifications. If they make changes, use the modified configuration in the next step. If they confirm proposed configuration, don't add it to parameters in next call, it will use cached value",
-                        "tool": "prepare_analysis_configuration"
-                    },
-                    {
-                        "step": 6,
-                        "description": "Analysis Execution",
-                        "guidance": "a) For one-shot: Results are already available. b) For step-by-step: Use 'execute_analysis_from_config' with the confirmed/modified configuration to generate the final results. Inform user that it would take time to generate the results.",
-                        "tools": ["analyze_source_question", "execute_analysis_from_config"]
-                    },
-                    {
-                        "step": 7,
-                        "description": "Results Presentation",
-                        "guidance": "Present the final results to the user, including: 1) A clear summary of insights, 2) A link to the interactive dashboard, 3) Any relevant intermediate results if requested. Inform user that he can modify charts in the dashboard and ask to run analysis again.",
-                        "tools": ["analyze_source_question", "execute_analysis_from_config"]
-                    },
-                    {
-                        "step": 8,
-                        "description": "Dashboard Reanalysis",
-                        "guidance": "If the user has modified charts in the dashboard and wants to run analysis again, use 'reanalyze_dashboard' to generate fresh insights based on the modified charts. This tool will use the cached dashboard URL and chart configurations from the previous analysis. Present the new summary to the user.",
-                        "tool": "reanalyze_dashboard"
-                    }
-                ],
+                "description": "This is a data analysis workflow. For clients with strict timeouts (e.g., < 60s), the **Granular Step-by-Step Workflow** is strongly recommended. For clients that can handle long-running requests, alternative composite tools are available.",
+                "recommended_workflow": {
+                    "title": "Granular Step-by-Step Workflow ",
+                    "description": "Execute each step of the analysis as a separate, fast-running tool call. The client-side caching will automatically pass results from one step to the next.",
+                    "steps": [
+                        {
+                            "step": 1,
+                            "description": "Source Selection: Ask the user for a source name to search for.",
+                            "tool": "list_sources",
+                            "guidance": "Use the 'list_sources' tool with the user's search term. Present the results and ask the user to select a source by its 'id'."
+                        },
+                        {
+                            "step": 2,
+                            "description": "Analyze Source Structure: Fetch and analyze the schema for the selected source.",
+                            "tool": "analyze_source_structure",
+                            "guidance": "Use 'analyze_source_structure' with the 'sourceId' from the previous step. Present the 'columnAnalysis' to the user to help them formulate a question."
+                        },
+                        {
+                            "step": 3,
+                            "description": "Generate Strategy: Create an analysis strategy based on the user's question.",
+                            "tool": "generate_strategy",
+                            "guidance": "After the user formulates a question, use 'generate_strategy'. The 'question' and 'columnAnalysis' are passed automatically."
+                        },
+                        {
+                            "step": 4,
+                            "description": "Create Configuration: Generate the dashboard configuration for user review.",
+                            "tool": "create_configuration",
+                            "guidance": "Use 'create_configuration' to generate the markdown configuration. The 'question', 'columnAnalysis', and 'strategy' are used from the cache. The tool returns 'markdownConfig'. Present this to the user for review and potential modification."
+                        },
+                        {
+                            "step": 5,
+                            "description": "Create Dashboard: Create the actual dashboard.",
+                            "tool": "create_dashboard",
+                            "guidance": "Use 'create_dashboard'. The 'markdownConfig' (potentially modified by the user) and 'sourceStructure' are used. This will return 'dashboardUrl' and 'chartConfigs'."
+                        },
+                        {
+                            "step": 6,
+                            "description": "Fetch Chart Data: Get the data for all charts in the dashboard.",
+                            "tool": "get_charts_data",
+                            "guidance": "Use 'get_charts_data'. The 'chartConfigs' from the previous step are used automatically. The tool returns a list of chart names for which data was found. Inform the user about the charts being analyzed."
+                        },
+                        {
+                            "step": 7,
+                            "description": "Generate Final Analysis: Generate AI insights for each chart and synthesize a final report.",
+                            "tool": "analyze_charts",
+                            "guidance": "Use 'analyze_charts' to get the detailed insights. This is the final tool call. After this, you must synthesize the returned insights, the cached strategy, and the original question into a comprehensive markdown report for the user, as per the tool's description. Present the final report and the 'dashboardUrl'."
+                        }
+                    ]
+                },
                 "important_notes": [
-                    "All data returned in responses or used as inputs is automatically cached - no need to repeat parameters in subsequent tool calls unless they've been modified",
-                    "Present technical information in user-friendly formats",
-                    "Wait for user confirmation at key decision points",
-                    "Offer suggestions and guidance based on the data structure",
-                    "After dashboard modifications, use reanalyze_dashboard to get fresh insights without recreating the dashboard"
+                    "All data returned in responses or used as inputs is automatically cached by the client - no need to repeat parameters in subsequent tool calls unless they've been modified.",
+                    "The client automatically injects required parameters like 'apiUrl' and 'jwtToken' from the session.",
+                    "Present technical information in user-friendly formats (e.g., use markdown tables for source structure).",
+                    "Wait for user confirmation at key decision points (like source selection and configuration review)."
                 ]
             }
         }
@@ -286,6 +390,15 @@ def call_tool():
                     pass # Keep LLM provided value
         else:
             print(f"[MCP CLIENT] Warning: Could not find schema for tool '{tool_name}'. Skipping generic parameter injection for session_id {session_id}.", flush=True)
+
+        # 3. Cache all current parameters (LLM-provided or client-injected) before calling the tool.
+        for key, value in params.items():
+            if key not in ("jwtToken", "apiUrl"):
+                 try:
+                     json.dumps(value)
+                     session_data['session_params'][key] = value
+                 except TypeError:
+                      print(f"[MCP CLIENT] Warning: Parameter '{key}' for tool '{tool_name}' is not JSON serializable. Not caching for session_id {session_id}.", flush=True)
 
         try:
             result = mcp_manager.call_tool(tool_name, params)
@@ -358,7 +471,7 @@ def run_server():
 
     print(f"[MCP CLIENT] Flask server starting on port {port}", flush=True)
     # Flask app.run is blocking, so this is the main loop for the process.
-    app.run(host='127.0.0.1', port=port, threaded=True) # threaded=True allows handling multiple requests concurrently
+    app.run(host='0.0.0.0', port=port, threaded=True) # threaded=True allows handling multiple requests concurrently
     # Code after app.run() will only execute if the server stops without os._exit(0)
     print(f"[MCP CLIENT] Flask server stopped on port {port}", flush=True)
     return port

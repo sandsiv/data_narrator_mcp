@@ -1,0 +1,31 @@
+{
+  "name": "@yourcompany/insight-digger-mcp",
+  "version": "1.0.0",
+  "description": "MCP Bridge for Insight Digger - Connect Claude Desktop to enterprise data analysis platform",
+  "main": "src/index.js",
+  "bin": {
+    "insight-digger-mcp": "./src/index.js"
+  },
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "claude-desktop",
+    "data-analysis",
+    "insight-digger"
+  ],
+  "author": "Your Company",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "axios": "^1.6.0",
+    "uuid": "^9.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+} 
