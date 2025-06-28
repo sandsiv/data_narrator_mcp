@@ -66,7 +66,7 @@ async def get(endpoint, headers=None, params=None, timeout=DEFAULT_TIMEOUT):
         return resp.json()
 
 # --- MCP Tools ---
-@mcp.tool(description="Validate API settings by testing the connection to the external data API. Args: apiUrl (str), jwtToken (str). Returns: {{'status': 'success'|'error', 'error': str (if status == 'error')}}.")
+@mcp.tool(description="Validate API settings by testing the connection to the external data API. **🔄 Auto-Cached**: apiUrl and jwtToken are automatically provided from your authentication session - you typically don't need to provide these parameters. Args: apiUrl (str), jwtToken (str). Returns: {{'status': 'success'|'error', 'error': str (if status == 'error')}}.")
 async def validate_settings(apiUrl: str, jwtToken: str) -> dict:
     """
     Test the connection to the external data API using the provided URL and JWT token.
@@ -92,7 +92,7 @@ async def validate_settings(apiUrl: str, jwtToken: str) -> dict:
         return {"status": "error", "error": str(e)}
 logging.info("Registered tool: validate_settings")
 
-@mcp.tool(description="List available data sources. This is typically the FIRST interactive step in data analysis. The user will select a source from this list, and its 'id' (returned in the 'data' array) will be used as 'sourceId' in other tools like 'prepare_analysis_configuration' or 'analyze_source_question'. Call this to allow the user to see and choose a data source, but ask user to provie a source name to search first. Use name provided by the user as 'search' parameter to filter the list. Avoid using this tool without 'search' value. Consider limit and page parameters in case of many sources with names that fit the search. Returns: {{'count': int, 'data': [{'id': str, 'title': str, 'type': str, 'updated': str, 'numberOfColumns': int}]}}.")
+@mcp.tool(description="List available data sources. This is typically the FIRST interactive step in data analysis. **🔄 Auto-Cached**: apiUrl and jwtToken are automatically provided from your authentication session. Only provide 'search', 'page', and 'limit' parameters as needed. Ask the user for a source name to search first. Returns: {{'count': int, 'data': [{'id': str, 'title': str, 'type': str, 'updated': str, 'numberOfColumns': int}]}}.")
 async def list_sources(apiUrl: str, jwtToken: str, search: str = "", page: int = 1, limit: int = 10) -> dict:
     """
     List available data sources from the external API, allowing the user to choose one for analysis.
@@ -129,7 +129,7 @@ async def list_sources(apiUrl: str, jwtToken: str, search: str = "", page: int =
         return {"status": "error", "error": str(e)}
 logging.info("Registered tool: list_sources")
 
-@mcp.tool(description="Fetches and analyzes the structure of a given data source. This is a key step after selecting a source. It returns a detailed analysis of the columns, which should be presented to the user to help them formulate a specific analytical question. The full source structure and the analysis are cached for subsequent steps.")
+@mcp.tool(description="Fetches and analyzes the structure of a given data source. This is a key step after selecting a source. **🔄 Auto-Cached**: apiUrl and jwtToken are automatically provided from authentication. Only provide the 'sourceId' parameter (from the previous list_sources step). Returns detailed column analysis to help formulate analytical questions.")
 async def analyze_source_structure(apiUrl: str, jwtToken: str, sourceId: str) -> dict:
     """
     Retrieves the structure for a source, analyzes its columns, and returns the analysis.
@@ -180,7 +180,7 @@ async def analyze_source_structure(apiUrl: str, jwtToken: str, sourceId: str) ->
         return {"status": "error", "error": str(e)}
 logging.info("Registered tool: analyze_source_structure")
 
-@mcp.tool(description="Generate analysis strategy for a question and column analysis. This is a granular step in the analysis workflow.")
+@mcp.tool(description="Generate analysis strategy for a question and column analysis. This is a granular step in the analysis workflow. **🔄 Auto-Cached**: 'columnAnalysis' is automatically provided from the previous analyze_source_structure step. Only provide the 'question' parameter from the user.")
 async def generate_strategy(question: str, columnAnalysis: list) -> dict:
     """
     Generate an analysis strategy for a given question and column analysis.
@@ -201,7 +201,7 @@ async def generate_strategy(question: str, columnAnalysis: list) -> dict:
         return {"status": "error", "error": str(e)}
 logging.info("Registered tool: generate_strategy")
 
-@mcp.tool(description="Create dashboard configuration from question, column analysis, and strategy. This is a granular step in the analysis workflow.")
+@mcp.tool(description="Create dashboard configuration from question, column analysis, and strategy. This is a granular step in the analysis workflow. **🔄 Auto-Cached**: 'question', 'columnAnalysis', and 'strategy' are automatically provided from previous steps. You typically don't need to provide any parameters for this tool.")
 async def create_configuration(question: str, columnAnalysis: list, strategy: dict) -> dict:
     """
     Create a dashboard configuration from the question, column analysis, and strategy.
@@ -226,7 +226,7 @@ async def create_configuration(question: str, columnAnalysis: list, strategy: di
         return {"status": "error", "error": str(e)}
 logging.info("Registered tool: create_configuration")
 
-@mcp.tool(description="Generate dashboard config (markdown) from question and source structure. Returns: dict (markdown configuration).")
+@mcp.tool(description="Generate dashboard config (markdown) from question and source structure. **🔄 Auto-Cached**: 'sourceStructure' is automatically provided from analyze_source_structure step. 'apiUrl' and 'jwtToken' are provided from authentication. Only provide the 'question' parameter from the user. Returns: dict (markdown configuration).")
 async def generate_config(question: str, sourceStructure: dict, apiUrl: str = None, jwtToken: str = None) -> dict:
     """
     Generate a dashboard configuration (in markdown) from a question and source structure.
@@ -251,7 +251,7 @@ async def generate_config(question: str, sourceStructure: dict, apiUrl: str = No
         return {"status": "error", "error": str(e)}
 logging.info("Registered tool: generate_config")
 
-@mcp.tool(description="Create a dashboard from config, source structure, and API settings. This is a granular step in the analysis workflow.")
+@mcp.tool(description="Create a dashboard from config, source structure, and API settings. This is a granular step in the analysis workflow. **🔄 Auto-Cached**: 'markdownConfig' is provided from create_configuration step, 'sourceStructure' from analyze_source_structure, and 'apiUrl'/'jwtToken' from authentication. You typically don't need to provide any parameters for this tool.")
 async def create_dashboard(markdownConfig: str, sourceStructure: dict, apiUrl: str, jwtToken: str) -> dict:
     """
     Create a dashboard from the provided markdown config, source structure, and API settings.
@@ -278,7 +278,7 @@ async def create_dashboard(markdownConfig: str, sourceStructure: dict, apiUrl: s
         return {"status": "error", "error": str(e)}
 logging.info("Registered tool: create_dashboard")
 
-@mcp.tool(description="Fetch data for multiple charts. This step is granular. It returns a summary of fetched charts (e.g., their names). The full data is cached for the next step and not returned to the LLM.")
+@mcp.tool(description="Fetch data for multiple charts. This step is granular. **🔄 Auto-Cached**: 'chartConfigs' is automatically provided from the create_dashboard step, and 'apiUrl'/'jwtToken' from authentication. You typically don't need to provide any parameters for this tool. Returns a summary of fetched charts (chart names). The full data is cached for the next step.")
 async def get_charts_data(chartConfigs: list, apiUrl: str, jwtToken: str) -> dict:
     """
     Fetch data for multiple charts using the provided chart configurations and API settings.
@@ -324,7 +324,7 @@ async def get_charts_data(chartConfigs: list, apiUrl: str, jwtToken: str) -> dic
         return {"status": "error", "error": str(e)}
 logging.info("Registered tool: get_charts_data")
 
-@mcp.tool(description="""Analyzes data from all charts and returns detailed insights. This is the final analytical step. After receiving the insights, you MUST synthesize them into a final report for the user. Your report should:
+@mcp.tool(description="""Analyzes data from all charts and returns detailed insights. This is the final analytical step. **🔄 Auto-Cached**: 'chartData' is automatically provided from get_charts_data step, 'question' from the workflow, and 'apiUrl'/'jwtToken' from authentication. You typically don't need to provide any parameters for this tool. After receiving the insights, you MUST synthesize them into a final report for the user. Your report should:
 1. Start with a brief summary that directly answers the user's original question.
 2. Follow the previously generated analysis strategy, using insights to address each point.
 3. Support findings with specific data points and note any limitations.

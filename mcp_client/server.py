@@ -240,6 +240,92 @@ def shutdown():
              pass # Ignore errors during cleanup attempt
         return jsonify({"status": "error", "error": str(e)}), 500
 
+@app.route('/tools-schema', methods=['GET'])
+def get_tools_schema():
+    """
+    Get tool schemas without requiring authentication.
+    This allows the bridge to show actual tool descriptions to Claude before authentication.
+    Returns the raw tool schemas from the MCP server.
+    """
+    try:
+        print("[MCP CLIENT] /tools-schema: Fetching tool schemas without authentication", flush=True)
+        
+        # Create a temporary MCP manager to get tool schemas
+        temp_manager = MCPServerManager()
+        
+        try:
+            # Start the manager temporarily
+            temp_manager.start()
+            
+            # Get tool schemas
+            tools = temp_manager.get_tool_schemas()
+            
+            # Filter out sensitive parameters only
+            filtered_tools = []
+            for tool in tools:
+                filtered_tool = filter_tool_schema(tool)
+                filtered_tools.append(filtered_tool)
+            
+            print(f"[MCP CLIENT] /tools-schema: Successfully fetched {len(filtered_tools)} tool schemas", flush=True)
+            
+            # Add comprehensive system information for Claude Desktop
+            system_info = {
+                "system_name": "Sandsiv+ Insight Digger",
+                "system_type": "Enterprise Data Analysis Platform",
+                "purpose": "Transform business questions into interactive dashboards and AI-powered insights using Sandsiv+ data sources",
+                "when_to_use": [
+                    "User wants to analyze data from Sandsiv+ platform",
+                    "User asks about business metrics, KPIs, or data trends",
+                    "User needs to create dashboards or data visualizations",
+                    "User mentions Sandsiv+, data analysis, or business intelligence",
+                    "User wants to explore available data sources",
+                    "User has analytical questions about their business data"
+                ],
+                "capabilities": [
+                    "Connect to Sandsiv+ data sources securely",
+                    "Analyze data structure and recommend visualization strategies",
+                    "Generate interactive dashboards with multiple chart types",
+                    "Extract AI-powered insights from data patterns",
+                    "Support complex multi-step analytical workflows",
+                    "Provide comprehensive analytical reports"
+                ],
+                "workflow_overview": "7-step process: Authentication → Source Discovery → Structure Analysis → Strategy Planning → Configuration → Dashboard Creation → Insight Generation",
+                "authentication_required": True,
+                "enterprise_features": [
+                    "JWT-based secure authentication",
+                    "Intelligent parameter caching - automatically injects data from previous tool calls",
+                    "Session management with workflow state preservation",
+                    "Multi-tenant data isolation",
+                    "Granular workflow optimization for timeout-sensitive clients"
+                ],
+                "caching_behavior": {
+                    "description": "The system automatically caches and injects parameters from previous tool calls. Claude should NOT repeat parameters that were used in previous steps.",
+                    "auto_injected_params": ["apiUrl", "jwtToken", "sourceId", "columnAnalysis", "strategy", "sourceStructure", "chartConfigs", "markdownConfig", "chartData"],
+                    "guidance": "Only provide parameters that are new or have changed. The system will automatically use cached values from the workflow session."
+                }
+            }
+            
+            return jsonify({
+                "status": "success",
+                "tools": filtered_tools,
+                "system_info": system_info
+            })
+            
+        finally:
+            # Always clean up the temporary manager
+            try:
+                temp_manager.stop()
+            except Exception as cleanup_e:
+                print(f"[MCP CLIENT] Warning: Error cleaning up temporary manager: {cleanup_e}", flush=True)
+                
+    except Exception as e:
+        import traceback
+        print(f"[MCP CLIENT] /tools-schema error:", e, traceback.format_exc(), flush=True)
+        return jsonify({
+            "status": "error", 
+            "error": f"Failed to fetch tool schemas: {str(e)}"
+        }), 500
+
 @app.route('/tools', methods=['POST'])
 # Changed to POST to accept session_id in body consistently with other endpoints
 def list_tools():
