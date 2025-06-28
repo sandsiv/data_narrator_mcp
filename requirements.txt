@@ -4,3 +4,5 @@ httpx
 mcp
 python-dotenv
 requests
+
+gunicorn
