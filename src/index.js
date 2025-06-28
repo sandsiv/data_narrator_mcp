@@ -38,6 +38,9 @@ let bridgeSession = {
   workflowGuidance: null
 };
 
+// Cache for /tools-schema response (never changes)
+let cachedToolsSchema = null;
+
 // Create MCP server
 const server = new Server(
   {
@@ -314,42 +317,50 @@ async function proxyToolCall(toolName, args) {
 }
 
 /**
- * Get system information from Flask API for Claude Desktop context
+ * Get tools schema from Flask API (cached forever)
  */
-async function getSystemInfo() {
+async function getToolsSchema() {
+  if (cachedToolsSchema) {
+    if (DEBUG_LEVEL) {
+      logToFile('tools_schema_cached', { purpose: 'Using cached tools schema' });
+    }
+    return cachedToolsSchema;
+  }
+  
   try {
-    console.error(`[BRIDGE] Fetching system information from /tools-schema`);
+    console.error(`[BRIDGE] Fetching tools schema from /tools-schema`);
     
     if (DEBUG_LEVEL) {
-      logToFile('system_info_request', { 
+      logToFile('tools_schema_request', { 
         url: `${MCP_CLIENT_URL}/tools-schema`,
-        purpose: 'Fetching system information for authentication tool description'
+        purpose: 'Fetching tools schema (will be cached forever)'
       });
     }
     
     const response = await axios.get(`${MCP_CLIENT_URL}/tools-schema`);
+    cachedToolsSchema = response.data;
     
     if (DEBUG_LEVEL) {
-      logToFile('system_info_response', { 
+      logToFile('tools_schema_response', { 
         status: response.status,
-        hasSystemInfo: !!response.data.system_info,
-        systemInfo: response.data.system_info,
-        toolsCount: response.data.tools?.length || 0
+        hasSystemInfo: !!cachedToolsSchema.system_info,
+        toolsCount: cachedToolsSchema.tools?.length || 0,
+        cached: true
       });
     }
     
-    return response.data.system_info || null;
+    return cachedToolsSchema;
   } catch (error) {
-    console.error(`[BRIDGE] Failed to fetch system info:`, error.message);
+    console.error(`[BRIDGE] Failed to fetch tools schema:`, error.message);
     
     if (DEBUG_LEVEL) {
-      logToFile('system_info_error', { 
+      logToFile('tools_schema_error', { 
         error: error.message,
         url: `${MCP_CLIENT_URL}/tools-schema`
       });
     }
     
-    return null;
+    return { system_info: null, tools: [] };
   }
 }
 
@@ -357,7 +368,8 @@ async function getSystemInfo() {
  * Create enhanced authentication tool description with system context
  */
 async function createAuthenticationTool() {
-  const systemInfo = await getSystemInfo();
+  const schema = await getToolsSchema();
+  const systemInfo = schema.system_info;
   
   let description = 'Setup authentication credentials for Sandsiv+ Insight Digger. This must be called FIRST before any analysis tools become available. Requires your API URL and JWT token.';
   
@@ -490,39 +502,8 @@ function enhanceToolsWithWorkflowGuidance(tools) {
  * Get all available tools (including unauthenticated ones marked as requiring auth)
  */
 async function getAllAvailableTools() {
-  try {
-    console.error(`[BRIDGE] Fetching all available tools from /tools-schema`);
-    
-    if (DEBUG_LEVEL) {
-      logToFile('all_tools_request', { 
-        url: `${MCP_CLIENT_URL}/tools-schema`,
-        purpose: 'Fetching all tools for proactive display'
-      });
-    }
-    
-    const response = await axios.get(`${MCP_CLIENT_URL}/tools-schema`);
-    
-    if (DEBUG_LEVEL) {
-      logToFile('all_tools_response', { 
-        status: response.status,
-        toolsCount: response.data.tools?.length || 0,
-        hasSystemInfo: !!response.data.system_info
-      });
-    }
-    
-    return response.data.tools || [];
-  } catch (error) {
-    console.error(`[BRIDGE] Failed to fetch all tools:`, error.message);
-    
-    if (DEBUG_LEVEL) {
-      logToFile('all_tools_error', { 
-        error: error.message,
-        url: `${MCP_CLIENT_URL}/tools-schema`
-      });
-    }
-    
-    return [];
-  }
+  const schema = await getToolsSchema();
+  return schema.tools || [];
 }
 
 /**

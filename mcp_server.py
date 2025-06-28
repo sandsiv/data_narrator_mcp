@@ -92,8 +92,8 @@ async def validate_settings(apiUrl: str, jwtToken: str) -> dict:
         return {"status": "error", "error": str(e)}
 logging.info("Registered tool: validate_settings")
 
-@mcp.tool(description="List available data sources. This is typically the FIRST interactive step in data analysis. **🔄 Auto-Cached**: apiUrl and jwtToken are automatically provided from your authentication session. Only provide 'search', 'page', and 'limit' parameters as needed. Ask the user for a source name to search first. Returns: {{'count': int, 'data': [{'id': str, 'title': str, 'type': str, 'updated': str, 'numberOfColumns': int}]}}.")
-async def list_sources(apiUrl: str, jwtToken: str, search: str = "", page: int = 1, limit: int = 10) -> dict:
+@mcp.tool(description="List available data sources. This is typically the FIRST interactive step in data analysis. Ask user to provide a search term to filter the sources. **🔄 Auto-Cached**: apiUrl and jwtToken are automatically provided from your authentication session. Only provide 'search', 'page', and 'limit' parameters as needed. Ask the user for a source name to search first. Returns: {{'count': int, 'data': [{'id': str, 'title': str, 'type': str, 'updated': str, 'numberOfColumns': int}]}}.")
+async def list_sources(apiUrl: str, jwtToken: str, search: str = "", page: int = 1, limit: int = 20) -> dict:
     """
     List available data sources from the external API, allowing the user to choose one for analysis.
     (Detailed comments here are for human developers; LLM guidance is in the decorator description.)
