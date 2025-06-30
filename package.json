@@ -1,28 +1,25 @@
 {
-  "name": "@yourcompany/insight-digger-mcp",
-  "version": "1.1.0",
-  "description": "MCP Bridge for Insight Digger - Connect Claude Desktop to enterprise data analysis platform with optional logging",
+  "name": "@sandsiv/data-narrator-mcp",
+  "version": "1.0.0",
+  "description": "MCP Bridge for Sandsiv Data Narrator - Connect LLM clients to sandsiv+ proprietary data analysis platform",
   "main": "src/index.js",
   "bin": {
-    "insight-digger-mcp": "./src/index.js"
+    "data-narrator-mcp": "./src/index.js"
   },
   "type": "module",
   "scripts": {
     "start": "node src/index.js",
     "test": "echo \"Error: no test specified\" && exit 1",
     "install-global": "npm install -g .",
-    "uninstall-global": "npm uninstall -g @yourcompany/insight-digger-mcp"
+    "uninstall-global": "npm uninstall -g @sandsiv/data-narrator-mcp"
   },
   "keywords": [
     "mcp",
-    "model-context-protocol",
-    "claude-desktop",
+    "sandsiv",
     "data-analysis",
-    "insight-digger",
-    "logging",
-    "enterprise"
+    "data-narrator"
   ],
-  "author": "Your Company",
+  "author": "Sandsiv Switzerland AG",
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
