@@ -7,33 +7,39 @@ import threading
 from dotenv import load_dotenv
 load_dotenv()
 
-# Configuration (replace with real values or load from .env)
-API_URL = os.getenv("apiUrl", "http://example.com/api")
-JWT_TOKEN = os.getenv("jwtToken", "test-jwt-token")
-SOURCE_ID = os.getenv("sourceId", "test-source-id")
-QUESTION = os.getenv("question", "What are the top sales?")
-# --- New Configuration ---
-# The test client now expects the server to be running on a fixed port
-# Set MCP_CLIENT_PORT environment variable before running the test
-PORT = int(os.getenv("MCP_CLIENT_PORT", 33000)) # Default to 33000 if env var not set
-SESSION_ID = os.getenv("SESSION_ID", "test-session-125") # Unique ID for this test run
-# --- End New Configuration ---
+# Enable test mode to skip credential validation
+os.environ["MCP_SKIP_VALIDATION"] = "true"
 
-# We no longer start/stop the server process from the test client itself.
-# Assume the server is already running as a service on the specified PORT.
+# Configuration - using real values from .env
+API_URL = os.getenv("apiUrl")
+JWT_TOKEN = os.getenv("jwtToken")
+SOURCE_ID = os.getenv("sourceId")
+QUESTION = os.getenv("question", "What are the main trends in this data?")
+
+# Check required environment variables
+if not API_URL or not JWT_TOKEN:
+    print("ERROR: Missing required environment variables!")
+    print("Please ensure .env file contains:")
+    print("- apiUrl=your_api_url")
+    print("- jwtToken=your_jwt_token")
+    print("- sourceId=your_source_id (optional)")
+    print("- question=your_question (optional)")
+    exit(1)
+
+print(f"Using API URL: {API_URL}")
+print(f"Using JWT Token: {JWT_TOKEN[:20]}...")
+print(f"Using Source ID: {SOURCE_ID}")
+print(f"Using Question: {QUESTION}")
+
+# Server configuration
+PORT = int(os.getenv("MCP_CLIENT_PORT", 33000))
+SESSION_ID = os.getenv("SESSION_ID", "test-session-125")
+
 base_url = f"http://127.0.0.1:{PORT}"
-
-# Helper to print server output (optional, requires server to be run with tee or similar)
-# In a service setup, you'd typically view logs via systemd-journald or log files
-# def print_subprocess_output(proc):
-#     for line in proc.stdout:
-#         print("[MCP CLIENT OUT]", line, end="")
-#     for line in proc.stderr:
-#         print("[MCP CLIENT ERR]", line, end="")
 
 try:
     # Wait for /health to respond (server readiness)
-    print(f"Waiting for server on port {PORT}...")
+    print(f"\nWaiting for server on port {PORT}...")
     for _ in range(30):
         try:
             resp = requests.get(f"{base_url}/health", timeout=0.5)
@@ -48,7 +54,7 @@ try:
         exit(1)
 
     # 1. POST /init for a specific session
-    print(f"\nInitializing session {SESSION_ID}...")
+    print(f"\n=== TEST 1: Initialize session {SESSION_ID} ===")
     init_payload = {
         "session_id": SESSION_ID,
         "apiUrl": API_URL,
@@ -58,143 +64,179 @@ try:
     init_response = resp.json()
     print("Init result:", init_response)
     if init_response.get("status") != "ok":
-        print("Error during initialization, aborting test.")
+        print("❌ FAIL: Error during initialization, aborting test.")
+        print("Response:", init_response)
         exit(1)
+    print("✅ PASS: Session initialized successfully")
 
     # 2. POST /tools for the specific session
-    print(f"\nFetching tools for session {SESSION_ID}...")
+    print(f"\n=== TEST 2: Fetch tools for session {SESSION_ID} ===")
     tools_payload = {"session_id": SESSION_ID}
     resp = requests.post(f"{base_url}/tools", json=tools_payload)
     tools_json = resp.json()
-    print("Tools result:", tools_json)
+    
+    if "tools" in tools_json:
+        tool_names = [tool.get("name") for tool in tools_json["tools"]]
+        print(f"✅ PASS: Found {len(tool_names)} tools: {tool_names}")
+    else:
+        print("❌ FAIL: No tools found in response")
+        print("Response:", tools_json)
 
-    # Show what LLM would get for tool descriptions
-    print("\nTool descriptions:")
-    print(json.dumps(tools_json, indent=2))
-
-    # 3. POST /call-tool (list_sources) for the specific session
-    print(f"\nTesting list_sources for session {SESSION_ID}...")
-    list_sources_payload = {
-        "session_id": SESSION_ID, # Add session_id
-        "tool": "list_sources",
-        "params": {"search": "[20230110] Detect Detractor Model", "limit": 1}
+    # 3. POST /call-tool (validate_settings)
+    print(f"\n=== TEST 3: Validate settings ===")
+    validate_payload = {
+        "session_id": SESSION_ID,
+        "tool": "validate_settings",
+        "params": {}  # apiUrl and jwtToken should be auto-injected
     }
-    print("Sending payload:", json.dumps(list_sources_payload, indent=2))
+    resp = requests.post(f"{base_url}/call-tool", json=validate_payload)
+    validate_result = resp.json()
+    print("Validate result:", validate_result)
+    
+    if validate_result.get("status") == "success":
+        print("✅ PASS: Settings validation successful")
+    else:
+        print("❌ FAIL: Settings validation failed")
+
+    # 4. POST /call-tool (list_sources)
+    print(f"\n=== TEST 4: List sources ===")
+    list_sources_payload = {
+        "session_id": SESSION_ID,
+        "tool": "list_sources",
+        "params": {"search": "", "limit": 5}  # Empty search to get some results
+    }
     resp = requests.post(f"{base_url}/call-tool", json=list_sources_payload)
 
-    source_id_to_use = None
+    source_id_to_use = None  # Will be determined from API response
     try:
         list_sources_result = resp.json()
-        print("Result:", json.dumps(list_sources_result, indent=2))
-        # Assuming status=success and data array is present and not empty for success
-        if resp.status_code == 200 and isinstance(list_sources_result.get("data"), list) and list_sources_result["data"]:
-            source_id_to_use = list_sources_result["data"][0].get("id")
-            print(f"Extracted sourceId: {source_id_to_use}")
-        elif isinstance(list_sources_result.get("data"), list) and not list_sources_result["data"]:
-             print("No sources found matching the search criteria (data array is empty).")
-        else:
-            print(f"list_sources call failed (status {resp.status_code}) or returned unexpected structure.")
-            # print("Response content:", list_sources_result) # Avoid printing large response again
-
-    except Exception as e:
-        print("Raw result (list_sources):", resp.text)
-        print(f"Error processing list_sources response: {e}")
-
-    if not source_id_to_use:
-        print("\nWarning: Cannot proceed with analysis tests without a sourceId from list_sources.")
-    else:
-        # 4. POST /call-tool (prepare_analysis_configuration) for the specific session
-        print(f"\n[TEST] /call-tool (prepare_analysis_configuration) for session {SESSION_ID}...")
-        prepare_payload = {
-            "session_id": SESSION_ID, # Add session_id
-            "tool": "prepare_analysis_configuration",
-            "params": {
-                "sourceId": source_id_to_use,
-                "question": QUESTION
-            }
-        }
-        print("Sending payload:", json.dumps(prepare_payload, indent=2))
-        resp = requests.post(f"{base_url}/call-tool", json=prepare_payload)
-
-        markdown_config_to_use = None
-        try:
-            prepare_result = resp.json()
-            print("Result:", json.dumps(prepare_result, indent=2))
-            if prepare_result.get("status") == "success":
-                markdown_config_to_use = prepare_result.get("markdownConfig")
-                # print(f"Extracted markdownConfig (first 100 chars): {markdown_config_to_use[:100] if markdown_config_to_use else 'None'}...")
+        print("List sources result:", json.dumps(list_sources_result, indent=2))
+        
+        if resp.status_code == 200 and list_sources_result.get("status") == "success" and isinstance(list_sources_result.get("data"), list):
+            if list_sources_result["data"]:
+                # Use SOURCE_ID from .env if available and exists in the results, otherwise use the first available
+                if SOURCE_ID:
+                    # Check if the SOURCE_ID from .env exists in the results
+                    found_source = next((s for s in list_sources_result["data"] if s.get("id") == SOURCE_ID), None)
+                    if found_source:
+                        source_id_to_use = SOURCE_ID
+                        print(f"✅ Using SOURCE_ID from .env: {source_id_to_use}")
+                    else:
+                        source_id_to_use = list_sources_result["data"][0].get("id")
+                        print(f"⚠️  SOURCE_ID from .env not found, using first available: {source_id_to_use}")
+                else:
+                    source_id_to_use = list_sources_result["data"][0].get("id")
+                    print(f"✅ Using first available source: {source_id_to_use}")
+                
+                print(f"✅ PASS: Found {len(list_sources_result['data'])} sources")
             else:
-                print("prepare_analysis_configuration call was not successful.")
-        except Exception as e:
-            print("Raw result (prepare_analysis_configuration):", resp.text)
-            print(f"Error processing prepare_analysis_configuration response: {e}")
-
-        if not markdown_config_to_use:
-            print("\nWarning: Cannot proceed with execute_analysis_from_config test without markdownConfig.")
+                print("⚠️  WARNING: No sources found in response")
         else:
-            # 5. POST /call-tool (execute_analysis_from_config) for the specific session
-            print(f"\n[TEST] /call-tool (execute_analysis_from_config) for session {SESSION_ID}...")
-            execute_payload = {
-                "session_id": SESSION_ID, # Add session_id
-                "tool": "execute_analysis_from_config",
-                "params": {
-                    "markdownConfig": markdown_config_to_use
-                }
-            }
-            print("Sending payload:", json.dumps(execute_payload, indent=2))
-            resp = requests.post(f"{base_url}/call-tool", json=execute_payload)
-            try:
-                execute_result = resp.json()
-                print("Result:", json.dumps(execute_result, indent=2))
-            except Exception as e:
-                print("Raw result (execute_analysis_from_config):", resp.text)
-                print(f"Error processing execute_analysis_from_config response: {e}")
+            print("❌ FAIL: list_sources call failed")
+            print(f"Status code: {resp.status_code}, Response: {list_sources_result}")
+    except Exception as e:
+        print("❌ FAIL: Error processing list_sources response:", e)
+        print("Raw response:", resp.text)
 
-    # --- New Test Case: Call with Invalid Session ID ---
-    print("\n[TEST] Call /tools with invalid session ID...")
+    # 5. Test the granular workflow if we have a source
+    if source_id_to_use and list_sources_result.get("status") == "success":
+        print(f"\n=== TEST 5: Analyze source structure ===")
+        analyze_payload = {
+            "session_id": SESSION_ID,
+            "tool": "analyze_source_structure",
+            "params": {"sourceId": source_id_to_use}
+        }
+        resp = requests.post(f"{base_url}/call-tool", json=analyze_payload)
+        analyze_result = resp.json()
+        
+        if analyze_result.get("status") == "success":
+            print("✅ PASS: Source structure analyzed successfully")
+            print(f"Column analysis available: {'columnAnalysis' in analyze_result}")
+        else:
+            print("❌ FAIL: Source structure analysis failed")
+            print("Result:", analyze_result)
+
+        # 6. Generate strategy
+        print(f"\n=== TEST 6: Generate strategy ===")
+        strategy_payload = {
+            "session_id": SESSION_ID,
+            "tool": "generate_strategy",
+            "params": {"question": QUESTION}  # columnAnalysis should be auto-injected
+        }
+        resp = requests.post(f"{base_url}/call-tool", json=strategy_payload)
+        strategy_result = resp.json()
+        
+        if strategy_result.get("status") == "success":
+            print("✅ PASS: Strategy generated successfully")
+        else:
+            print("❌ FAIL: Strategy generation failed")
+            print("Result:", strategy_result)
+
+        # 7. Create configuration
+        print(f"\n=== TEST 7: Create configuration ===")
+        config_payload = {
+            "session_id": SESSION_ID,
+            "tool": "create_configuration",
+            "params": {}  # question, columnAnalysis, strategy should be auto-injected
+        }
+        resp = requests.post(f"{base_url}/call-tool", json=config_payload)
+        config_result = resp.json()
+        
+        if config_result.get("status") == "success":
+            print("✅ PASS: Configuration created successfully")
+            print(f"Markdown config available: {'markdownConfig' in config_result}")
+        else:
+            print("❌ FAIL: Configuration creation failed")
+            print("Result:", config_result)
+
+    else:
+        print("\n⚠️  SKIPPING: Advanced workflow tests (no sourceId available)")
+
+    # 8. Test with invalid session ID
+    print(f"\n=== TEST 8: Invalid session ID ===")
     invalid_session_id = "invalid-session-xyz"
     invalid_tools_payload = {"session_id": invalid_session_id}
     resp = requests.post(f"{base_url}/tools", json=invalid_tools_payload)
-    print("Result:", resp.json())
-    if resp.status_code == 400: # Or 404/409 depending on desired API behavior; code uses 400 if missing, 409 if not initialized
-        print("PASS: Received expected error for invalid session ID.")
+    
+    if resp.status_code in [400, 409]:
+        print("✅ PASS: Received expected error for invalid session ID")
     else:
-        print(f"FAIL: Expected status 400/409 for invalid session ID, but got {resp.status_code}.")
-    # --- End New Test Case ---
+        print(f"❌ FAIL: Expected status 400/409 for invalid session ID, but got {resp.status_code}")
+        print("Response:", resp.json())
 
-
-    # 6. POST /shutdown for the specific session
-    print(f"\n[TEST] /shutdown for session {SESSION_ID}...")
-    shutdown_payload = {"session_id": SESSION_ID} # Add session_id
+    # 9. Shutdown session
+    print(f"\n=== TEST 9: Shutdown session ===")
+    shutdown_payload = {"session_id": SESSION_ID}
     resp = requests.post(f"{base_url}/shutdown", json=shutdown_payload)
-    print("Result:", resp.json())
-    if resp.status_code == 200 and resp.json().get("status") == "ok":
-        print("PASS: Session shut down successfully.")
+    shutdown_result = resp.json()
+    
+    if resp.status_code == 200 and shutdown_result.get("status") == "ok":
+        print("✅ PASS: Session shut down successfully")
     else:
-         print(f"FAIL: Shutdown failed with status {resp.status_code} or unexpected response.")
+        print(f"❌ FAIL: Shutdown failed with status {resp.status_code}")
+        print("Response:", shutdown_result)
 
-
-    # --- New Test Case: Call After Shutdown ---
-    print(f"\n[TEST] Call /tools again for session {SESSION_ID} after shutdown...")
+    # 10. Test access after shutdown
+    print(f"\n=== TEST 10: Access after shutdown ===")
     post_shutdown_tools_payload = {"session_id": SESSION_ID}
     resp = requests.post(f"{base_url}/tools", json=post_shutdown_tools_payload)
-    print("Result:", resp.json())
-    # Expecting an error because the session data should be cleared
-    if resp.status_code == 400 or resp.status_code == 409: # Code returns 400 if session_id missing, 409 if manager not initialized/ready
-        print("PASS: Received expected error when accessing session after shutdown.")
+    
+    if resp.status_code in [400, 409]:
+        print("✅ PASS: Received expected error when accessing session after shutdown")
     else:
-        print(f"FAIL: Expected status 400/409 after session shutdown, but got {resp.status_code}.")
-    # --- End New Test Case ---
+        print(f"❌ FAIL: Expected status 400/409 after session shutdown, but got {resp.status_code}")
+        print("Response:", resp.json())
 
+    print(f"\n🎉 TEST SUITE COMPLETED")
 
 except requests.exceptions.ConnectionError as e:
-    print(f"\n[TEST] Error: Could not connect to MCP client server on port {PORT}. Is it running?")
+    print(f"\n❌ ERROR: Could not connect to MCP client server on port {PORT}. Is it running?")
     print(f"Details: {e}")
+    print(f"Start the server with: python -u -m mcp_client.server")
 except Exception as e:
     import traceback
-    print(f"\n[TEST] An unexpected error occurred during the test run:")
+    print(f"\n❌ ERROR: An unexpected error occurred during the test run:")
     print(e)
     traceback.print_exc()
 finally:
-    # No subprocess to terminate here, as the server runs externally.
     print("\n[TEST] Test run finished.") 

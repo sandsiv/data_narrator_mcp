@@ -40,7 +40,7 @@ Add to your Claude Desktop configuration file:
   "mcpServers": {
     "insight-digger": {
       "command": "npx",
-      "args": ["-y", "@yourcompany/insight-digger-mcp"],
+      "args": ["-y", "@sandsiv/data-narrator-mcp@1.0.0"],
       "env": {
         "MCP_CLIENT_URL": "https://your-mcp-service.com"
       }

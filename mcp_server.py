@@ -24,16 +24,25 @@ Do NOT run this file directly with 'python mcp_server.py'.
 """
 
 import os
+import sys
 import httpx
 from mcp.server.fastmcp import FastMCP
 import asyncio
 import logging
+from dotenv import load_dotenv
 
-# Setup file logging
+# Load environment variables from .env file
+load_dotenv()
+
+# Add the parent directory to Python path to import config
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from mcp_client.config import MCPConfig
+
+# Setup file logging using config
 logging.basicConfig(
-    filename="/tmp/mcp_server.log",
-    level=logging.WARNING,
-    format="%(asctime)s [%(levelname)s] %(message)s",
+    filename=MCPConfig.Logging.LOG_FILE,
+    level=getattr(logging, MCPConfig.Logging.LEVEL),
+    format=MCPConfig.Logging.FORMAT,
     force=True
 )
 logging.warning("[STARTUP] mcp_server.py: script started")
@@ -42,26 +51,40 @@ logging.warning("[STARTUP] mcp_server.py: script started")
 mcp = FastMCP("Insight Digger MCP")
 logging.warning("[STARTUP] FastMCP instance created")
 
-# Helper: Get API base URL for the Flask server
-API_BASE_URL = os.getenv("INSIGHT_DIGGER_API_URL", "https://internal.sandsiv.com/data-narrator/api")
+# API configuration from shared config
+API_BASE_URL = MCPConfig.API.BASE_URL
 
-# Set default timeouts
-DEFAULT_TIMEOUT = httpx.Timeout(60.0)
-LONG_TIMEOUT = httpx.Timeout(300.0)
+# Set timeouts from config
+DEFAULT_TIMEOUT = httpx.Timeout(MCPConfig.API.DEFAULT_TIMEOUT)
+LONG_TIMEOUT = httpx.Timeout(MCPConfig.API.LONG_TIMEOUT)
 
 # Helper: Async HTTP POST
 async def post(endpoint, json=None, timeout=DEFAULT_TIMEOUT):
     url = f"{API_BASE_URL}{endpoint}"
+    logging.info(f"POST {url} with payload: {json}")
+    headers = {"Content-Type": "application/json", "User-Agent": "insight-digger-mcp/1.0"}
     async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(url, json=json)
+        logging.info(f"POST {url} with headers: {headers}")
+        resp = await client.post(url, json=json, headers=headers)
+        logging.info(f"POST {url} response status: {resp.status_code}")
+        if resp.status_code >= 400:
+            logging.error(f"POST {url} response body: {resp.text}")
         resp.raise_for_status()
         return resp.json()
 
 # Helper: Async HTTP GET
 async def get(endpoint, headers=None, params=None, timeout=DEFAULT_TIMEOUT):
     url = f"{API_BASE_URL}{endpoint}"
+    logging.info(f"GET {url} with headers: {headers}, params: {params}")
+    # Add User-Agent to headers
+    if headers is None:
+        headers = {}
+    headers = {**headers, "User-Agent": "insight-digger-mcp/1.0"}
     async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.get(url, headers=headers, params=params)
+        logging.info(f"GET {url} response status: {resp.status_code}")
+        if resp.status_code >= 400:
+            logging.error(f"GET {url} response body: {resp.text}")
         resp.raise_for_status()
         return resp.json()
 
@@ -354,4 +377,5 @@ logging.info("Registered tool: analyze_charts")
 
 # Print all registered tools after all definitions
 print("[DEBUG] All tools registered:", list(getattr(mcp, "_tools", {}).keys()))
-print("[DEBUG] MCP server ready for protocol connection.")
+print(f"[DEBUG] MCP server ready for protocol connection. Using API: {API_BASE_URL}")
+print(f"[DEBUG] Timeouts - Default: {MCPConfig.API.DEFAULT_TIMEOUT}s, Long: {MCPConfig.API.LONG_TIMEOUT}s")

@@ -4,5 +4,6 @@ httpx
 mcp
 python-dotenv
 requests
+redis>=4.0.0
 
 gunicorn
