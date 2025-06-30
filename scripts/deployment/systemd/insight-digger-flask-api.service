@@ -1,0 +1,66 @@
+[Unit]
+Description=Gunicorn instance to serve the Insight Digger MCP Flask API
+After=network.target redis.service
+Wants=redis.service
+Requires=redis.service
+
+[Service]
+Type=notify
+User=insight-digger
+Group=insight-digger
+WorkingDirectory=/opt/insight-digger-mcp
+
+# Environment variables
+Environment=PATH=/opt/insight-digger-mcp/venv/bin
+Environment=PYTHONPATH=/opt/insight-digger-mcp/src/python
+Environment=MCP_CONFIG_ENV=production
+Environment=MCP_CLIENT_PORT=33000
+Environment=REDIS_HOST=localhost
+Environment=REDIS_PORT=6379
+
+# Gunicorn command optimized for Redis-based architecture
+# Multiple workers are now safe due to Redis session storage
+ExecStart=/opt/insight-digger-mcp/venv/bin/gunicorn \
+    --workers 3 \
+    --threads 2 \
+    --worker-class gthread \
+    --timeout 310 \
+    --keep-alive 2 \
+    --max-requests 1000 \
+    --max-requests-jitter 50 \
+    --preload \
+    --bind "127.0.0.1:${MCP_CLIENT_PORT}" \
+    --access-logfile /opt/insight-digger-mcp/logs/gunicorn-access.log \
+    --error-logfile /opt/insight-digger-mcp/logs/gunicorn-error.log \
+    --log-level info \
+    --capture-output \
+    src.python.insight_digger_mcp.flask_api.app:app
+
+# Graceful shutdown
+ExecReload=/bin/kill -s HUP $MAINPID
+KillMode=mixed
+TimeoutStopSec=30
+
+# Restart policy
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=insight-digger-flask-api
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/insight-digger-mcp/logs
+ReadWritePaths=/tmp
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target 

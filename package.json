@@ -1,23 +1,33 @@
 {
-  "name": "@sandsiv/data-narrator-mcp",
+  "name": "@sandsiv/insight-digger-mcp",
   "version": "1.0.0",
-  "description": "MCP Bridge for Sandsiv Data Narrator - Connect LLM clients to sandsiv+ proprietary data analysis platform",
-  "main": "src/index.js",
+  "description": "Enterprise-grade MCP system for data analysis with Claude Desktop integration",
+  "main": "src/nodejs/src/index.js",
   "bin": {
-    "data-narrator-mcp": "./src/index.js"
+    "insight-digger-mcp": "./src/nodejs/bin/insight-digger-mcp"
   },
   "type": "module",
   "scripts": {
-    "start": "node src/index.js",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node src/nodejs/src/index.js",
+    "test": "npm run test:nodejs && npm run test:python",
+    "test:nodejs": "cd src/nodejs && npm test",
+    "test:python": "python -m pytest tests/",
+    "dev:bridge": "cd src/nodejs && npm run dev",
+    "dev:flask": "python src/python/scripts/start_flask_api.py",
+    "dev:mcp": "python src/python/scripts/start_mcp_server.py",
     "install-global": "npm install -g .",
-    "uninstall-global": "npm uninstall -g @sandsiv/data-narrator-mcp"
+    "uninstall-global": "npm uninstall -g @sandsiv/insight-digger-mcp",
+    "build": "echo 'No build step required'",
+    "lint": "echo 'Linting not configured yet'",
+    "format": "echo 'Formatting not configured yet'"
   },
   "keywords": [
     "mcp",
     "sandsiv",
     "data-analysis",
-    "data-narrator"
+    "insight-digger",
+    "enterprise",
+    "claude-desktop"
   ],
   "author": "Sandsiv Switzerland AG",
   "license": "MIT",
@@ -26,7 +36,14 @@
     "axios": "^1.6.0",
     "uuid": "^9.0.0"
   },
+  "devDependencies": {
+    "nodemon": "^3.0.0"
+  },
   "engines": {
-    "node": ">=18.0.0"
-  }
+    "node": ">=18.0.0",
+    "python": ">=3.8"
+  },
+  "workspaces": [
+    "src/nodejs"
+  ]
 } 

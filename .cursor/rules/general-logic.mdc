@@ -1,8 +1,0 @@
----
-description: 
-globs: 
-alwaysApply: true
----
-Project insight_digger_mcp is an MCP connector to project insight_digger.
-Insight_digger provides API endpoints for semiautomatic data analysis using sandsiv+ platform. It has it's own web UI as well.
-/insight_digger_mcp/mcp_server.py makes API calls to endpoints defined in /insight_digger/app.py

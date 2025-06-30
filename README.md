@@ -26,7 +26,7 @@ This project provides a sophisticated **3-layer MCP architecture** designed for 
 
 #### 1. Install the NPX Bridge
 ```bash
-npx @yourcompany/insight-digger-mcp
+npx @sandsiv/data-narrator-mcp
 ```
 
 #### 2. Configure Claude Desktop
@@ -38,7 +38,7 @@ Add to your Claude Desktop configuration file:
 ```json
 {
   "mcpServers": {
-    "insight-digger": {
+    "data-narrator": {
       "command": "npx",
       "args": ["-y", "@sandsiv/data-narrator-mcp@1.0.0"],
       "env": {
@@ -49,6 +49,8 @@ Add to your Claude Desktop configuration file:
 }
 ```
 
+**Note:** The `MCP_CLIENT_URL` environment variable is optional. By default, the system will use Sandsiv's hosted MCP service. Only provide this variable if you're deploying your own version of the data-narrator-mcp service.
+
 #### 3. Usage in Claude Desktop
 1. **Authenticate first:** Use the `setup_authentication` tool with your API URL and JWT token
 2. **Start analysis:** Begin with `list_sources` to see available data
@@ -58,14 +60,18 @@ Add to your Claude Desktop configuration file:
 
 **For custom integrations or testing:**
 
-#### 1. Start the MCP Client Service
+#### 1. Start the MCP Services
 ```bash
 # Install dependencies
-pip install -r requirements.txt
+./scripts/setup/install_dependencies.sh
+
+# Activate virtual environment
+source venv/bin/activate
 
 # Start the Flask API service  
-cd mcp_client
-python -m flask run --host=0.0.0.0 --port=5000
+npm run dev:flask
+# OR
+python src/python/scripts/start_flask_api.py
 ```
 
 #### 2. Use the REST API
@@ -99,24 +105,26 @@ curl -X POST http://localhost:5000/call-tool \
 git clone <repository-url>
 cd insight_digger_mcp
 
-# Install Python dependencies
-pip install -r requirements.txt
+# Install all dependencies
+./scripts/setup/install_dependencies.sh --dev
 
-# Install Node.js dependencies (for bridge)
-npm install
+# Activate virtual environment
+source venv/bin/activate
 
 # Run tests
-python test_mcp_tools.py
-python mcp_client/test_client.py
+npm test
+# OR separately:
+npm run test:python
+npm run test:nodejs
 ```
 
 ### Testing the NPX Bridge Locally
 ```bash
 # Start your MCP client service
-cd mcp_client && python server.py
+npm run dev:flask
 
 # In another terminal, test the bridge
-cd src && node index.js
+npm run dev:bridge
 # Use the MCP Inspector or Claude Desktop to test
 ```
 
@@ -172,9 +180,9 @@ The MCP Server (`mcp_server.py`) connects to your backend API using configuratio
 ### Service Deployment
 ```bash
 # Install as systemd service (Linux)
-sudo cp insight-digger-mcp.service /etc/systemd/system/
-sudo systemctl enable insight-digger-mcp
-sudo systemctl start insight-digger-mcp
+sudo cp data-narrator-mcp.service /etc/systemd/system/
+sudo systemctl enable data-narrator-mcp
+sudo systemctl start data-narrator-mcp
 ```
 
 ### NPX Package Publishing
@@ -185,7 +193,7 @@ npm publish --access public
 ```
 
 ### Monitoring
-- Service logs: `journalctl -u insight-digger-mcp -f`
+- Service logs: `journalctl -u data-narrator-mcp -f`
 - Bridge logs: Console output in Claude Desktop
 - Session tracking: All sessions logged with UUIDs
 

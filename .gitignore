@@ -68,15 +68,49 @@ pip-log.txt
 pip-delete-this-directory.txt
 
 # Logs
-logs
+logs/
 *.log
+mcp_server_debug.log
 
 # Distribution / packaging
 dist/
 build/
+*.egg-info/
 
 # Session files (if any are accidentally created)
 *.session
 
 # Test files
 test-session-*
+
+# Temporary files
+*.tmp
+*.temp
+
+# Development files
+debug_*.py
+*_debug.py
+
+# Configuration files (keep templates)
+config/.env
+!config/.env.example
+
+# Pytest cache
+.pytest_cache/
+
+# MyPy cache
+.mypy_cache/
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# Redis dump files
+dump.rdb
+
+# Local development overrides
+docker-compose.override.yml
