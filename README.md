@@ -1,3 +1,6 @@
+# **Disclaimer: this project and documentation were created with active usage of AI with basic code and content review and are in the "beta" state as a part of POC project. There can be errors in documentation.** 
+
+
 # Insight Digger MCP
 
 Enterprise-grade Model Context Protocol (MCP) system for data analysis with Claude Desktop integration.
