@@ -66,11 +66,17 @@ class MCPServerManager:
         # Get the path to the virtual environment's bin directory
         venv_bin = os.path.dirname(sys.executable)
         mcp_cmd = os.path.join(venv_bin, "mcp")
-        
+
+        # Ensure subprocess inherits environment variables
+        # Start with current environment and merge api_env if provided
+        subprocess_env = os.environ.copy()
+        if api_env:
+            subprocess_env.update(api_env)
+
         server_params = StdioServerParameters(
             command=mcp_cmd,
             args=["run", self.server_script],
-            env=api_env
+            env=subprocess_env
         )
         async with stdio_client(server_params) as (read, write):
             self._read, self._write = read, write

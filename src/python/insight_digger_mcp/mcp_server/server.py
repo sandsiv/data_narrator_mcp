@@ -58,6 +58,8 @@ logging.warning("[STARTUP] FastMCP instance created")
 
 # API configuration from shared config
 API_BASE_URL = MCPConfig.API.BASE_URL
+logging.warning(f"[STARTUP] API_BASE_URL configured as: {API_BASE_URL}")
+logging.warning(f"[STARTUP] INSIGHT_DIGGER_API_URL env var: {os.getenv('INSIGHT_DIGGER_API_URL')}")
 
 # Set timeouts from config
 DEFAULT_TIMEOUT = httpx.Timeout(MCPConfig.API.DEFAULT_TIMEOUT)
@@ -380,7 +382,7 @@ async def analyze_charts(chartData: dict, question: str, apiUrl: str, jwtToken: 
         return {"status": "error", "error": str(e)}
 logging.info("Registered tool: analyze_charts")
 
-# Print all registered tools after all definitions
-print("[DEBUG] All tools registered:", list(getattr(mcp, "_tools", {}).keys()))
-print(f"[DEBUG] MCP server ready for protocol connection. Using API: {API_BASE_URL}")
-print(f"[DEBUG] Timeouts - Default: {MCPConfig.API.DEFAULT_TIMEOUT}s, Long: {MCPConfig.API.LONG_TIMEOUT}s")
+# Log all registered tools after all definitions
+logging.info(f"[DEBUG] All tools registered: {list(getattr(mcp, '_tools', {}).keys())}")
+logging.info(f"[DEBUG] MCP server ready for protocol connection. Using API: {API_BASE_URL}")
+logging.info(f"[DEBUG] Timeouts - Default: {MCPConfig.API.DEFAULT_TIMEOUT}s, Long: {MCPConfig.API.LONG_TIMEOUT}s")
